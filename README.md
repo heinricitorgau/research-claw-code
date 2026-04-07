@@ -81,6 +81,8 @@ Example workflow:
 ```bash
 # run experimental agent loop
 python -m src.main
+```
+
 Outputs and behavior may change as the system evolves.
 
 ⸻
