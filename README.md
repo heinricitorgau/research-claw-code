@@ -1,93 +1,120 @@
-# Claw Code
+# 🚀 Mini-Agent System
 
 <p align="center">
-  <a href="https://github.com/ultraworkers/claw-code">ultraworkers/claw-code</a>
-  ·
-  <a href="./USAGE.md">Usage</a>
-  ·
-  <a href="./rust/README.md">Rust workspace</a>
-  ·
-  <a href="./PARITY.md">Parity</a>
-  ·
-  <a href="./ROADMAP.md">Roadmap</a>
-  ·
-  <a href="https://discord.gg/5TUQKqFWd">UltraWorkers Discord</a>
+  <strong>Exploring Lightweight Agent Loops for AI-Assisted Development</strong>
 </p>
 
-<p align="center">
-  <a href="https://star-history.com/#ultraworkers/claw-code&Date">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=ultraworkers/claw-code&type=Date&theme=dark" />
-      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=ultraworkers/claw-code&type=Date" />
-      <img alt="Star history for ultraworkers/claw-code" src="https://api.star-history.com/svg?repos=ultraworkers/claw-code&type=Date" width="600" />
-    </picture>
-  </a>
-</p>
+---
 
-<p align="center">
-  <img src="assets/claw-hero.jpeg" alt="Claw Code" width="300" />
-</p>
+## 🧠 Overview
 
-Claw Code is the public Rust implementation of the `claw` CLI agent harness.
-The canonical implementation lives in [`rust/`](./rust), and the current source of truth for this repository is **ultraworkers/claw-code**.
+Mini-Agent System is an experimental repository focused on designing and validating **lightweight agent workflows** for software development.
 
-> [!IMPORTANT]
-> Start with [`USAGE.md`](./USAGE.md) for build, auth, CLI, session, and parity-harness workflows. Make `claw doctor` your first health check after building, use [`rust/README.md`](./rust/README.md) for crate-level details, read [`PARITY.md`](./PARITY.md) for the current Rust-port checkpoint, and see [`docs/container.md`](./docs/container.md) for the container-first workflow.
+The goal is not to build a fully autonomous system, but to explore a **controlled, evaluation-driven loop** that enhances reliability, iteration speed, and system-level thinking.
 
-## Current repository shape
+---
 
-- **`rust/`** — canonical Rust workspace and the `claw` CLI binary
-- **`USAGE.md`** — task-oriented usage guide for the current product surface
-- **`PARITY.md`** — Rust-port parity status and migration notes
-- **`ROADMAP.md`** — active roadmap and cleanup backlog
-- **`PHILOSOPHY.md`** — project intent and system-design framing
-- **`src/` + `tests/`** — companion Python/reference workspace and audit helpers; not the primary runtime surface
+## 🎯 Objectives
 
-## Quick start
+- Investigate practical agent design patterns
+- Build reproducible **generate → evaluate → refine** workflows
+- Validate AI-assisted development under controlled constraints
+- Maintain human-in-the-loop decision making
+
+---
+
+## ⚙️ Core Concept
+
+At the center of this repository is a minimal agent loop:
+Task → Generate → Evaluate → Refine
+This loop enables:
+
+- Iterative improvement of outputs
+- Evaluation-guided refinement
+- Controlled automation without loss of oversight
+
+---
+
+## 🤖 Agent Model (Lightweight)
+
+This system follows a **minimal agent abstraction**, focusing on simplicity and extensibility:
+
+- Task-driven execution
+- Evaluation as a first-class component
+- Feedback-based refinement
+- No hidden autonomous orchestration
+
+This is intentionally designed to remain:
+
+- 🔒 Controlled
+- 🧩 Modular
+- 🧠 Transparent
+
+---
+
+## 🧪 Research Scope
+
+This repository explores:
+
+- Agent loop design
+- Evaluation strategies and metrics
+- Prompt-driven generation workflows
+- Error handling and refinement cycles
+- System behavior under iterative feedback
+
+It serves as a **sandbox for experimentation**, not a production-ready system.
+
+---
+
+## 📦 Repository Structure
+.
+├── src/        # Core logic and experimental implementations
+├── tests/      # Validation and evaluation tests
+├── docs/       # Design notes and research artifacts
+└── assets/     # Supporting materials
+---
+
+## 🚀 Usage (Experimental)
+
+Example workflow:
 
 ```bash
-cd rust
-cargo build --workspace
-./target/debug/claw --help
-./target/debug/claw prompt "summarize this repository"
-```
+# run experimental agent loop
+python -m src.main
+Outputs and behavior may change as the system evolves.
 
-Authenticate with either an API key or the built-in OAuth flow:
+⸻
 
-```bash
-export ANTHROPIC_API_KEY="sk-ant-..."
-# or
-cd rust
-./target/debug/claw login
-```
+📈 Current Status
+	•	🧪 Early-stage experimental system
+	•	⚙️ Core loop under active refinement
+	•	🔍 Focus on evaluation-driven iteration
 
-Run the workspace test suite:
+⸻
 
-```bash
-cd rust
-cargo test --workspace
-```
+🔭 Roadmap
+	•	Stabilize agent loop abstraction
+	•	Improve evaluation mechanisms
+	•	Introduce modular task definitions
+	•	Expand experimentation scenarios
 
-## Documentation map
+⸻
 
-- [`USAGE.md`](./USAGE.md) — quick commands, auth, sessions, config, parity harness
-- [`rust/README.md`](./rust/README.md) — crate map, CLI surface, features, workspace layout
-- [`PARITY.md`](./PARITY.md) — parity status for the Rust port
-- [`rust/MOCK_PARITY_HARNESS.md`](./rust/MOCK_PARITY_HARNESS.md) — deterministic mock-service harness details
-- [`ROADMAP.md`](./ROADMAP.md) — active roadmap and open cleanup work
-- [`PHILOSOPHY.md`](./PHILOSOPHY.md) — why the project exists and how it is operated
+⚠️ Disclaimer
 
-## Ecosystem
+This repository is intended for research and experimentation purposes only.
 
-Claw Code is built in the open alongside the broader UltraWorkers toolchain:
+It does not represent a fully autonomous system, and avoids exposing detailed implementation strategies.
 
-- [clawhip](https://github.com/Yeachan-Heo/clawhip)
-- [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent)
-- [oh-my-claudecode](https://github.com/Yeachan-Heo/oh-my-claudecode)
-- [oh-my-codex](https://github.com/Yeachan-Heo/oh-my-codex)
-- [UltraWorkers Discord](https://discord.gg/5TUQKqFWd)
+⸻
 
-## Ownership / affiliation disclaimer
+🧠 Philosophy
 
-- This repository does **not** claim ownership of the original Claude Code source material.
-- This repository is **not affiliated with, endorsed by, or maintained by Anthropic**.
+The goal is not to replace developers, but to explore:
+
+How far a simple, controlled agent loop can go in improving development workflows.
+
+⸻
+
+👨‍💻 Author
+	•	Heinnrici — System Exploration & Development
