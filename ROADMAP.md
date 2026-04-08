@@ -1,81 +1,84 @@
 # ROADMAP.md
 
-# Clawable Coding Harness Roadmap
+# Clawable Coding Harness 路線圖
 
-## Goal
+## 目標
 
-Turn claw-code into the most **clawable** coding harness:
-- no human-first terminal assumptions
-- no fragile prompt injection timing
-- no opaque session state
-- no hidden plugin or MCP failures
-- no manual babysitting for routine recovery
+把 claw-code 變成最 **clawable** 的 coding harness：
 
-This roadmap assumes the primary users are **claws wired through hooks, plugins, sessions, and channel events**.
+- 不假設人類優先的 terminal 使用方式
+- 不依賴脆弱的 prompt 注入時機
+- 不容許 opaque 的 session state
+- 不隱藏 plugin 或 MCP failures
+- 不需要人類替例行 recovery 持續 babysitting
 
-## Definition of "clawable"
+這份 roadmap 的前提是：主要使用者是**透過 hooks、plugins、sessions 與 channel events 接線進來的 claws**。
 
-A clawable harness is:
-- deterministic to start
-- machine-readable in state and failure modes
-- recoverable without a human watching the terminal
-- branch/test/worktree aware
-- plugin/MCP lifecycle aware
-- event-first, not log-first
-- capable of autonomous next-step execution
+## 「clawable」的定義
 
-## Current Pain Points
+一個 clawable harness 應該具備：
 
-### 1. Session boot is fragile
-- trust prompts can block TUI startup
-- prompts can land in the shell instead of the coding agent
-- "session exists" does not mean "session is ready"
+- 可決定性地啟動
+- 狀態與 failure modes 可被機器讀取
+- 不需要人類盯著 terminal 也能恢復
+- 知道 branch / test / worktree 狀態
+- 知道 plugin / MCP lifecycle 狀態
+- 以 event 為先，而不是以 log 為先
+- 能夠自主執行下一步
 
-### 2. Truth is split across layers
+## 當前痛點
+
+### 1. Session 啟動仍然脆弱
+- trust prompts 可能阻塞 TUI 啟動
+- prompt 可能落進 shell，而不是 coding agent
+- 「session exists」不等於「session is ready」
+
+### 2. 真實狀態散落在多層之間
 - tmux state
 - clawhip event stream
 - git/worktree state
 - test state
 - gateway/plugin/MCP runtime state
 
-### 3. Events are too log-shaped
-- claws currently infer too much from noisy text
-- important states are not normalized into machine-readable events
+### 3. Events 太像 logs
+- claws 目前仍必須從 noisy text 中推斷太多事情
+- 關鍵狀態尚未被正規化為 machine-readable events
 
-### 4. Recovery loops are too manual
+### 4. Recovery loops 太依賴人工
 - restart worker
-- accept trust prompt
-- re-inject prompt
-- detect stale branch
+- 接受 trust prompt
+- 重新注入 prompt
+- 偵測 stale branch
 - retry failed startup
-- classify infra vs code failures manually
+- 手動區分 infra vs code failures
 
-### 5. Branch freshness is not enforced enough
-- side branches can miss already-landed main fixes
-- broad test failures can be stale-branch noise instead of real regressions
+### 5. Branch freshness 還不夠被強制
+- side branches 可能漏掉 main 上已經落地的 fixes
+- 大範圍測試失敗有時只是 stale branch 雜訊，不是真回歸
 
-### 6. Plugin/MCP failures are under-classified
-- startup failures, handshake failures, config errors, partial startup, and degraded mode are not exposed cleanly enough
+### 6. Plugin/MCP failures 分類不足
+- startup failures、handshake failures、config errors、partial startup 與 degraded mode 還沒有被足夠清楚地暴露出來
 
-### 7. Human UX still leaks into claw workflows
-- too much depends on terminal/TUI behavior instead of explicit agent state transitions and control APIs
+### 7. 人類 UX 仍滲入 claw workflows
+- 太多流程仍依賴 terminal/TUI 行為，而不是明確的 agent state transitions 與 control APIs
 
-## Product Principles
+## 產品原則
 
-1. **State machine first** — every worker has explicit lifecycle states.
-2. **Events over scraped prose** — channel output should be derived from typed events.
-3. **Recovery before escalation** — known failure modes should auto-heal once before asking for help.
-4. **Branch freshness before blame** — detect stale branches before treating red tests as new regressions.
-5. **Partial success is first-class** — e.g. MCP startup can succeed for some servers and fail for others, with structured degraded-mode reporting.
-6. **Terminal is transport, not truth** — tmux/TUI may remain implementation details, but orchestration state must live above them.
-7. **Policy is executable** — merge, retry, rebase, stale cleanup, and escalation rules should be machine-enforced.
+1. **State machine first**：每個 worker 都要有明確 lifecycle states。
+2. **Events over scraped prose**：channel output 應由 typed events 推導，而不是由抓取文字湊出來。
+3. **Recovery before escalation**：已知 failure modes 應先自動修復一次，再決定是否求助。
+4. **Branch freshness before blame**：先檢查 stale branch，再把紅測試當成新 regression。
+5. **Partial success is first-class**：例如 MCP startup 可以部分成功、部分失敗，且需有結構化 degraded-mode reporting。
+6. **Terminal is transport, not truth**：tmux/TUI 可以保留成實作細節，但 orchestration state 必須活在更高一層。
+7. **Policy is executable**：merge、retry、rebase、stale cleanup 與 escalation rules 應由機器執行，而不是只存在聊天指令裡。
 
-## Roadmap
+## 路線圖
 
 ## Phase 1 — Reliable Worker Boot
 
-### 1. Ready-handshake lifecycle for coding workers
-Add explicit states:
+### 1. Coding workers 的 ready-handshake lifecycle
+新增明確狀態：
+
 - `spawning`
 - `trust_required`
 - `ready_for_prompt`
@@ -85,21 +88,24 @@ Add explicit states:
 - `finished`
 - `failed`
 
-Acceptance:
-- prompts are never sent before `ready_for_prompt`
-- trust prompt state is detectable and emitted
-- shell misdelivery becomes detectable as a first-class failure state
+驗收標準：
+
+- 在 `ready_for_prompt` 前永遠不送 prompt
+- 可以偵測並發出 trust prompt state
+- shell 誤投遞成為可偵測的一級 failure state
 
 ### 2. Trust prompt resolver
-Add allowlisted auto-trust behavior for known repos/worktrees.
+為已知 repos/worktrees 增加 allowlisted auto-trust 行為。
 
-Acceptance:
-- trusted repos auto-clear trust prompts
-- events emitted for `trust_required` and `trust_resolved`
-- non-allowlisted repos remain gated
+驗收標準：
+
+- trusted repos 會自動清除 trust prompts
+- 發出 `trust_required` 與 `trust_resolved` events
+- 不在 allowlist 中的 repos 仍保留 gating
 
 ### 3. Structured session control API
-Provide machine control above tmux:
+在 tmux 之上提供機器控制介面：
+
 - create worker
 - await ready
 - send task
@@ -108,13 +114,15 @@ Provide machine control above tmux:
 - restart worker
 - terminate worker
 
-Acceptance:
-- a claw can operate a coding worker without raw send-keys as the primary control plane
+驗收標準：
+
+- claw 可以在不依賴 raw send-keys 的情況下操作 coding worker
 
 ## Phase 2 — Event-Native Clawhip Integration
 
 ### 4. Canonical lane event schema
-Define typed events such as:
+定義 typed events，例如：
+
 - `lane.started`
 - `lane.ready`
 - `lane.prompt_misdelivery`
@@ -128,12 +136,14 @@ Define typed events such as:
 - `lane.failed`
 - `branch.stale_against_main`
 
-Acceptance:
-- clawhip consumes typed lane events
-- Discord summaries are rendered from structured events instead of pane scraping alone
+驗收標準：
+
+- clawhip 能消費 typed lane events
+- Discord summaries 由 structured events 渲染，而不是只靠 pane scraping
 
 ### 5. Failure taxonomy
-Normalize failure classes:
+正規化 failure classes：
+
 - `prompt_delivery`
 - `trust_gate`
 - `branch_divergence`
@@ -146,59 +156,68 @@ Normalize failure classes:
 - `tool_runtime`
 - `infra`
 
-Acceptance:
-- blockers are machine-classified
-- dashboards and retry policies can branch on failure type
+驗收標準：
+
+- blockers 能被機器分類
+- dashboards 與 retry policies 可依 failure type 分流
 
 ### 6. Actionable summary compression
-Collapse noisy event streams into:
+把 noisy event streams 壓縮成：
+
 - current phase
 - last successful checkpoint
 - current blocker
 - recommended next recovery action
 
-Acceptance:
-- channel status updates stay short and machine-grounded
-- claws stop inferring state from raw build spam
+驗收標準：
+
+- channel status updates 保持精簡且 machine-grounded
+- claws 不再需要從 raw build spam 猜狀態
 
 ## Phase 3 — Branch/Test Awareness and Auto-Recovery
 
-### 7. Stale-branch detection before broad verification
-Before broad test runs, compare current branch to `main` and detect if known fixes are missing.
+### 7. 在大範圍驗證前先做 stale-branch detection
+在跑 broad tests 前，先比較目前 branch 與 `main`，確認是否缺少已知 fixes。
 
-Acceptance:
-- emit `branch.stale_against_main`
-- suggest or auto-run rebase/merge-forward according to policy
-- avoid misclassifying stale-branch failures as new regressions
+驗收標準：
 
-### 8. Recovery recipes for common failures
-Encode known automatic recoveries for:
+- 發出 `branch.stale_against_main`
+- 依 policy 建議或自動執行 rebase/merge-forward
+- 避免把 stale-branch failures 誤判成新的 regressions
+
+### 8. 常見 failures 的 recovery recipes
+把已知自動修復流程編碼化，涵蓋：
+
 - trust prompt unresolved
-- prompt delivered to shell
+- prompt 被送進 shell
 - stale branch
-- compile red after cross-crate refactor
+- cross-crate refactor 後 compile red
 - MCP startup handshake failure
 - partial plugin startup
 
-Acceptance:
-- one automatic recovery attempt occurs before escalation
-- the attempted recovery is itself emitted as structured event data
+驗收標準：
+
+- 在 escalation 前先自動恢復一次
+- recovery attempt 本身也要發出 structured event data
 
 ### 9. Green-ness contract
-Workers should distinguish:
+workers 應能區分：
+
 - targeted tests green
 - package green
 - workspace green
 - merge-ready green
 
-Acceptance:
-- no more ambiguous "tests passed" messaging
-- merge policy can require the correct green level for the lane type
+驗收標準：
+
+- 不再出現模糊的「tests passed」訊息
+- merge policy 可以依 lane type 要求正確層級的 green
 
 ## Phase 4 — Claws-First Task Execution
 
 ### 10. Typed task packet format
-Define a structured task packet with fields like:
+定義結構化 task packet，欄位例如：
+
 - objective
 - scope
 - repo/worktree
@@ -208,22 +227,26 @@ Define a structured task packet with fields like:
 - reporting contract
 - escalation policy
 
-Acceptance:
-- claws can dispatch work without relying on long natural-language prompt blobs alone
-- task packets can be logged, retried, and transformed safely
+驗收標準：
 
-### 11. Policy engine for autonomous coding
-Encode automation rules such as:
-- if green + scoped diff + review passed -> merge to dev
-- if stale branch -> merge-forward before broad tests
-- if startup blocked -> recover once, then escalate
-- if lane completed -> emit closeout and cleanup session
+- claws 可不只依賴長篇自然語言 prompt blobs 來派工
+- task packets 可被安全記錄、重試與轉換
 
-Acceptance:
-- doctrine moves from chat instructions into executable rules
+### 11. Autonomous coding 的 policy engine
+把自動化規則編碼化，例如：
+
+- 若 green + scoped diff + review passed -> merge to dev
+- 若 stale branch -> 先 merge-forward 再做 broad tests
+- 若 startup blocked -> recover once, then escalate
+- 若 lane completed -> emit closeout and cleanup session
+
+驗收標準：
+
+- doctrine 從 chat instructions 進一步轉成 executable rules
 
 ### 12. Claw-native dashboards / lane board
-Expose a machine-readable board of:
+暴露 machine-readable board，顯示：
+
 - repos
 - active claws
 - worktrees
@@ -233,26 +256,30 @@ Expose a machine-readable board of:
 - merge readiness
 - last meaningful event
 
-Acceptance:
-- claws can query status directly
-- human-facing views become a rendering layer, not the source of truth
+驗收標準：
+
+- claws 可直接查詢狀態
+- human-facing views 只是 rendering layer，不再是 source of truth
 
 ## Phase 5 — Plugin and MCP Lifecycle Maturity
 
 ### 13. First-class plugin/MCP lifecycle contract
-Each plugin/MCP integration should expose:
+每個 plugin/MCP integration 都應暴露：
+
 - config validation contract
 - startup healthcheck
 - discovery result
 - degraded-mode behavior
 - shutdown/cleanup contract
 
-Acceptance:
-- partial-startup and per-server failures are reported structurally
-- successful servers remain usable even when one server fails
+驗收標準：
+
+- partial-startup 與 per-server failures 以結構化方式回報
+- 即使有一個 server 失敗，其餘成功的 servers 仍可使用
 
 ### 14. MCP end-to-end lifecycle parity
-Close gaps from:
+補齊以下面向的差距：
+
 - config load
 - server registration
 - spawn/connect
@@ -262,183 +289,175 @@ Close gaps from:
 - error surfacing
 - shutdown/cleanup
 
-Acceptance:
-- parity harness and runtime tests cover healthy and degraded startup cases
-- broken servers are surfaced as structured failures, not opaque warnings
+驗收標準：
 
-## Immediate Backlog (from current real pain)
+- parity harness 與 runtime tests 可涵蓋 healthy 與 degraded startup cases
+- 壞掉的 servers 會以 structured failures 呈現，而不是 opaque warnings
 
-Priority order: P0 = blocks CI/green state, P1 = blocks integration wiring, P2 = clawability hardening, P3 = swarm-efficiency improvements.
+## Immediate Backlog（來自當前真實痛點）
 
-**P0 — Fix first (CI reliability)**
-1. Isolate `render_diff_report` tests into tmpdir — **done**: `render_diff_report_for()` tests run in temp git repos instead of the live working tree, and targeted `cargo test -p rusty-claude-cli render_diff_report -- --nocapture` now stays green during branch/worktree activity
-2. Expand GitHub CI from single-crate coverage to workspace-grade verification — **done**: `.github/workflows/rust-ci.yml` now runs `cargo test --workspace` plus fmt/clippy at the workspace level
-3. Add release-grade binary workflow — **done**: `.github/workflows/release.yml` now builds tagged Rust release artifacts for the CLI
-4. Add container-first test/run docs — **done**: `Containerfile` + `docs/container.md` document the canonical Docker/Podman workflow for build, bind-mount, and `cargo test --workspace` usage
-5. Surface `doctor` / preflight diagnostics in onboarding docs and help — **done**: README + USAGE now put `claw doctor` / `/doctor` in the first-run path and point at the built-in preflight report
-6. Automate branding/source-of-truth residue checks in CI — **done**: `.github/scripts/check_doc_source_of_truth.py` and the `doc-source-of-truth` CI job now block stale repo/org/invite residue in tracked docs and metadata
-7. Eliminate warning spam from first-run help/build path — **done**: current `cargo run -q -p rusty-claude-cli -- --help` renders clean help output without a warning wall before the product surface
-8. Promote `doctor` from slash-only to top-level CLI entrypoint — **done**: `claw doctor` is now a local shell entrypoint with regression coverage for direct help and health-report output
-9. Make machine-readable status commands actually machine-readable — **done**: `claw --output-format json status` and `claw --output-format json sandbox` now emit structured JSON snapshots instead of prose tables
-10. Unify legacy config/skill namespaces in user-facing output — **done**: skills/help JSON/text output now present `.claw` as the canonical namespace and collapse legacy roots behind `.claw`-shaped source ids/labels
-11. Honor JSON output on inventory commands like `skills` and `mcp` — **done**: direct CLI inventory commands now honor `--output-format json` with structured payloads for both skills and MCP inventory
-12. Audit `--output-format` contract across the whole CLI surface — **done**: direct CLI commands now honor deterministic JSON/text handling across help/version/status/sandbox/agents/mcp/skills/bootstrap-plan/system-prompt/init/doctor, with regression coverage in `output_format_contract.rs` and resumed `/status` JSON coverage
+優先順序：P0 = 阻塞 CI/green state，P1 = 阻塞 integration wiring，P2 = clawability hardening，P3 = swarm-efficiency improvements。
 
-**P1 — Next (integration wiring, unblocks verification)**
-2. Add cross-module integration tests — **done**: 12 integration tests covering worker→recovery→policy, stale_branch→policy, green_contract→policy, reconciliation flows
-3. Wire lane-completion emitter — **done**: `lane_completion` module with `detect_lane_completion()` auto-sets `LaneContext::completed` from session-finished + tests-green + push-complete → policy closeout
-4. Wire `SummaryCompressor` into the lane event pipeline — **done**: `compress_summary_text()` feeds into `LaneEvent::Finished` detail field in `tools/src/lib.rs`
+**P0 — 優先修復（CI reliability）**
+1. 把 `render_diff_report` tests 隔離到 tmpdir — **完成**：`render_diff_report_for()` tests 現在在 temp git repos 中執行，而不是 live working tree；定向 `cargo test -p rusty-claude-cli render_diff_report -- --nocapture` 在 branch/worktree 活動下仍保持綠燈
+2. 將 GitHub CI 從單 crate 覆蓋擴大為 workspace 級驗證 — **完成**：`.github/workflows/rust-ci.yml` 現在在 workspace 層級執行 `cargo test --workspace`、fmt 與 clippy
+3. 新增 release-grade binary workflow — **完成**：`.github/workflows/release.yml` 現在會為 CLI 建置 tagged Rust release artifacts
+4. 新增 container-first 測試/執行文件 — **完成**：`Containerfile` + `docs/container.md` 文件化 canonical Docker/Podman workflow，用於 build、bind-mount 與 `cargo test --workspace`
+5. 在 onboarding docs 與 help 中凸顯 `doctor` / preflight diagnostics — **完成**：README + USAGE 現在把 `claw doctor` / `/doctor` 放在 first-run path，並指向 built-in preflight report
+6. 在 CI 自動化 branding/source-of-truth residue checks — **完成**：`.github/scripts/check_doc_source_of_truth.py` 與 `doc-source-of-truth` CI job 現在會阻擋 tracked docs 與 metadata 中過期的 repo/org/invite residue
+7. 消除首次執行 help/build path 的 warning spam — **完成**：目前 `cargo run -q -p rusty-claude-cli -- --help` 可以直接輸出乾淨 help，不再先出現一整牆 warnings
+8. 把 `doctor` 從 slash-only 提升為 top-level CLI entrypoint — **完成**：`claw doctor` 現在可直接由 local shell 執行，且有 direct help 與 health-report output 的 regression coverage
+9. 讓 machine-readable status commands 真正 machine-readable — **完成**：`claw --output-format json status` 與 `claw --output-format json sandbox` 現在輸出 structured JSON snapshots，而不是 prose tables
+10. 在 user-facing output 中統一 legacy config/skill namespaces — **完成**：skills/help JSON/text output 現在把 `.claw` 作為 canonical namespace，並把 legacy roots 收斂到 `.claw` 風格的 source ids/labels
+11. 讓 `skills` 與 `mcp` 這類 inventory commands 尊重 JSON output — **完成**：direct CLI inventory commands 現在會尊重 `--output-format json`，為 skills 與 MCP inventory 輸出 structured payloads
+12. 稽核整個 CLI surface 的 `--output-format` contract — **完成**：direct CLI commands 現在在 help/version/status/sandbox/agents/mcp/skills/bootstrap-plan/system-prompt/init/doctor 之間都遵守 deterministic JSON/text handling，並在 `output_format_contract.rs` 與 resumed `/status` JSON coverage 中有 regression coverage
 
-**P2 — Clawability hardening (original backlog)**
-5. Worker readiness handshake + trust resolution — **done**: `WorkerStatus` state machine with `Spawning` → `TrustRequired` → `ReadyForPrompt` → `PromptAccepted` → `Running` lifecycle, `trust_auto_resolve` + `trust_gate_cleared` gating
-6. Prompt misdelivery detection and recovery — **done**: `prompt_delivery_attempts` counter, `PromptMisdelivery` event detection, `auto_recover_prompt_misdelivery` + `replay_prompt` recovery arm
-7. Canonical lane event schema in clawhip — **done**: `LaneEvent` enum with `Started/Blocked/Failed/Finished` variants, `LaneEvent::new()` typed constructor, `tools/src/lib.rs` integration
-8. Failure taxonomy + blocker normalization — **done**: `WorkerFailureKind` enum (`TrustGate/PromptDelivery/Protocol/Provider`), `FailureScenario::from_worker_failure_kind()` bridge to recovery recipes
-9. Stale-branch detection before workspace tests — **done**: `stale_branch.rs` module with freshness detection, behind/ahead metrics, policy integration
-10. MCP structured degraded-startup reporting — **done**: `McpManager` degraded-startup reporting (+183 lines in `mcp_stdio.rs`), failed server classification (startup/handshake/config/partial), structured `failed_servers` + `recovery_recommendations` in tool output
-11. Structured task packet format — **done**: `task_packet.rs` module with `TaskPacket` struct, validation, serialization, `TaskScope` resolution (workspace/module/single-file/custom), integrated into `tools/src/lib.rs`
-12. Lane board / machine-readable status API — **done**: Lane completion hardening + `LaneContext::completed` auto-detection + MCP degraded reporting surface machine-readable state
-13. **Session completion failure classification** — **done**: `WorkerFailureKind::Provider` + `observe_completion()` + recovery recipe bridge landed
-14. **Config merge validation gap** — **done**: `config.rs` hook validation before deep-merge (+56 lines), malformed entries fail with source-path context instead of merged parse errors
-15. **MCP manager discovery flaky test** — **done**: `manager_discovery_report_keeps_healthy_servers_when_one_server_fails` now runs as a normal workspace test again after repeated stable passes, so degraded-startup coverage is no longer hidden behind `#[ignore]`
+**P1 — 接下來（integration wiring，解除 verification 阻塞）**
+2. 新增跨模組 integration tests — **完成**：已有 12 個 integration tests，涵蓋 worker→recovery→policy、stale_branch→policy、green_contract→policy、reconciliation flows
+3. 接上 lane-completion emitter — **完成**：`lane_completion` module 與 `detect_lane_completion()` 會根據 session-finished + tests-green + push-complete，自動把 `LaneContext::completed` 設為完成並進入 policy closeout
+4. 將 `SummaryCompressor` 接進 lane event pipeline — **完成**：`compress_summary_text()` 現在會餵給 `tools/src/lib.rs` 中 `LaneEvent::Finished` 的 detail field
 
-16. **Commit provenance / worktree-aware push events** — **done**: `LaneCommitProvenance` now carries branch/worktree/canonical-commit/supersession metadata in lane events, and `dedupe_superseded_commit_events()` is applied before agent manifests are written so superseded commit events collapse to the latest canonical lineage
-17. **Orphaned module integration audit** — **done**: `runtime` now keeps `session_control` and `trust_resolver` behind `#[cfg(test)]` until they are wired into a real non-test execution path, so normal builds no longer advertise dead clawability surface area.
-18. **Context-window preflight gap** — **done**: provider request sizing now emits `context_window_blocked` before oversized requests leave the process, using a model-context registry instead of the old naive max-token heuristic.
-19. **Subcommand help falls through into runtime/API path** — **done**: `claw doctor --help`, `claw status --help`, `claw sandbox --help`, and nested `mcp`/`skills` help are now intercepted locally without runtime/provider startup, with regression tests covering the direct CLI paths.
-20. **Session state classification gap (working vs blocked vs finished vs truly stale)** — **done**: agent manifests now derive machine states such as `working`, `blocked_background_job`, `blocked_merge_conflict`, `degraded_mcp`, `interrupted_transport`, `finished_pending_report`, and `finished_cleanable`, and terminal-state persistence records commit provenance plus derived state so downstream monitoring can distinguish quiet progress from truly idle sessions.
-21. **Resumed `/status` JSON parity gap** — dogfooding shows fresh `claw status --output-format json` now emits structured JSON, but resumed slash-command status still leaks through a text-shaped path in at least one dispatch path. Local CI-equivalent repro fails `rust/crates/rusty-claude-cli/tests/resume_slash_commands.rs::resumed_status_command_emits_structured_json_when_requested` with `expected value at line 1 column 1`, so resumed automation can receive text where JSON was explicitly requested. **Action:** unify fresh vs resumed `/status` rendering through one output-format contract and add regression coverage so resumed JSON output is guaranteed valid.
-22. **Opaque failure surface for session/runtime crashes** — repeated dogfood-facing failures can currently collapse to generic wrappers like `Something went wrong while processing your request. Please try again, or use /new to start a fresh session.` without exposing whether the fault was provider auth, session corruption, slash-command dispatch, render failure, or transport/runtime panic. This blocks fast self-recovery and turns actionable clawability bugs into blind retries. **Action:** preserve a short user-safe failure class (`provider_auth`, `session_load`, `command_dispatch`, `render`, `runtime_panic`, etc.), attach a local trace/session id, and ensure operators can jump from the chat-visible error to the exact failure log quickly.
-23. **`doctor --output-format json` check-level structure gap** — **done**: `claw doctor --output-format json` now keeps the human-readable `message`/`report` while also emitting structured per-check diagnostics (`name`, `status`, `summary`, `details`, plus typed fields like workspace paths and sandbox fallback data), with regression coverage in `output_format_contract.rs`.
-24. **Plugin lifecycle init/shutdown test flakes under workspace-parallel execution** — dogfooding surfaced that `build_runtime_runs_plugin_lifecycle_init_and_shutdown` can fail under `cargo test --workspace` while passing in isolation because sibling tests race on tempdir-backed shell init script paths. This is test brittleness rather than a code-path regression, but it still destabilizes CI confidence and wastes diagnosis cycles. **Action:** isolate temp resources per test robustly (unique dirs + no shared cwd assumptions), audit cleanup timing, and add a regression guard so the plugin lifecycle test remains stable under parallel workspace execution.
-26. **Resumed local-command JSON parity gap** — **done**: direct `claw --output-format json` already had structured renderers for `sandbox`, `mcp`, `skills`, `version`, and `init`, but resumed `claw --output-format json --resume <session> /…` paths still fell back to prose because resumed slash dispatch only emitted JSON for `/status`. Resumed `/sandbox`, `/mcp`, `/skills`, `/version`, and `/init` now reuse the same JSON envelopes as their direct CLI counterparts, with regression coverage in `rust/crates/rusty-claude-cli/tests/resume_slash_commands.rs` and `rust/crates/rusty-claude-cli/tests/output_format_contract.rs`.
-
-41. **Phantom completions root cause: global session store has no per-worktree isolation** —
-
-    **Root cause.** The session store under `~/.local/share/opencode` is global to the host. Every `opencode serve` instance — including the parallel lane workers spawned per worktree — reads and writes the same on-disk session directory. Sessions are keyed only by id and timestamp, not by the workspace they were created in, so there is no structural barrier between a session created in worktree `/tmp/b4-phantom-diag` and one created in `/tmp/b4-omc-flat`. Whichever serve instance picks up a given session id can drive it from whatever CWD that serve happens to be running in.
-
-    **Impact.** Parallel lanes silently cross wires. A lane reports a clean run — file edits, builds, tests — and the orchestrator marks the lane green, but the writes were applied against another worktree's CWD because a sibling `opencode serve` won the session race. The originating worktree shows no diff, the *other* worktree gains unexplained edits, and downstream consumers (clawhip lane events, PR pushes, merge gates) treat the empty originator as a successful no-op. These are the "phantom completions" we keep chasing: success messaging without any landed changes in the lane that claimed them, plus stray edits in unrelated lanes whose own runs never touched those files. Because the report path is happy, retries and recovery recipes never fire, so the lane silently wedges until a human notices the diff is empty.
-
-    **Proposed fix.** Bind every session to its workspace root + branch at creation time and refuse to drive it from any other CWD.
-
-    - At session creation, capture the canonical workspace root (resolved git worktree path) and the active branch and persist them on the session record.
-    - On every load (`opencode serve`, slash-command resume, lane recovery), validate that the current process CWD matches the persisted workspace root before any tool with side effects (file_ops, bash, git) is allowed to run. Mismatches surface as a typed `WorkspaceMismatch` failure class instead of silently writing to the wrong tree.
-    - Namespace the on-disk session path under the workspace fingerprint (e.g. `<session_store>/<workspace_hash>/<session_id>`) so two parallel `opencode serve` instances physically cannot collide on the same session id.
-    - Forks inherit the parent's workspace root by default; an explicit re-bind is required to move a session to a new worktree, and that re-bind is itself recorded as a structured event so the orchestrator can audit cross-worktree handoffs.
-    - Surface a `branch.workspace_mismatch` lane event so clawhip stops counting wrong-CWD writes as lane completions.
-
-    **Status.** A `workspace_root` field has been added to `Session` in `rust/crates/runtime/src/session.rs` (with builder, accessor, JSON + JSONL round-trip, fork inheritance, and given/when/then test coverage in `persists_workspace_root_round_trip_and_forks_inherit_it`). The CWD validation, the namespaced on-disk path, and the `branch.workspace_mismatch` lane event are still outstanding and tracked under this item.
+**P2 — Clawability hardening（原始 backlog）**
+5. Worker readiness handshake + trust resolution — **完成**：`WorkerStatus` state machine 已有 `Spawning` → `TrustRequired` → `ReadyForPrompt` → `PromptAccepted` → `Running` lifecycle，以及 `trust_auto_resolve` + `trust_gate_cleared` gating
+6. Prompt misdelivery detection and recovery — **完成**：已有 `prompt_delivery_attempts` counter、`PromptMisdelivery` event detection、`auto_recover_prompt_misdelivery` + `replay_prompt` recovery arm
+7. Canonical lane event schema in clawhip — **完成**：已有 `LaneEvent` enum 與 `Started/Blocked/Failed/Finished` variants、`LaneEvent::new()` typed constructor，以及 `tools/src/lib.rs` integration
+8. Failure taxonomy + blocker normalization — **完成**：已有 `WorkerFailureKind` enum（`TrustGate/PromptDelivery/Protocol/Provider`）與 `FailureScenario::from_worker_failure_kind()` bridge to recovery recipes
+9. 在 workspace tests 前做 stale-branch detection — **完成**：已有 `stale_branch.rs` module，提供 freshness detection、behind/ahead metrics 與 policy integration
+10. MCP structured degraded-startup reporting — **完成**：`McpManager` 已支援 degraded-startup reporting（`mcp_stdio.rs` 中 +183 行），並提供 failed server classification（startup/handshake/config/partial）與 tool output 中結構化的 `failed_servers` + `recovery_recommendations`
+11. Structured task packet format — **完成**：已有 `task_packet.rs` module、`TaskPacket` struct、validation、serialization、`TaskScope` resolution（workspace/module/single-file/custom），並整合進 `tools/src/lib.rs`
+12. Lane board / machine-readable status API — **完成**：lane completion hardening + `LaneContext::completed` auto-detection + MCP degraded reporting 都已提供 machine-readable state
+13. **Session completion failure classification** — **完成**：`WorkerFailureKind::Provider` + `observe_completion()` + recovery recipe bridge 已落地
+14. **Config merge validation gap** — **完成**：`config.rs` 在 deep-merge 前增加 hook validation（+56 行）；格式錯誤的 entries 會帶著 source-path context 失敗，而不是以 merged parse errors 失敗
+15. **MCP manager discovery flaky test** — **完成**：`manager_discovery_report_keeps_healthy_servers_when_one_server_fails` 經多次穩定通過後，已恢復為一般 workspace test，不再藏在 `#[ignore]` 後面
+16. **Commit provenance / worktree-aware push events** — **完成**：`LaneCommitProvenance` 現在在 lane events 中帶 branch/worktree/canonical-commit/supersession metadata；`dedupe_superseded_commit_events()` 會在 agent manifests 寫出前去重，讓 superseded commit events 收斂到最新 canonical lineage
+17. **Orphaned module integration audit** — **完成**：`runtime` 現在把 `session_control` 與 `trust_resolver` 放在 `#[cfg(test)]` 後面，直到它們接入真實非測試執行路徑，避免一般 builds 對外宣稱實際不存在的 clawability surface
+18. **Context-window preflight gap** — **完成**：provider request sizing 現在會在 oversized requests 離開 process 前發出 `context_window_blocked`，並改用 model-context registry，而不是舊的 naive max-token heuristic
+19. **Subcommand help falls through into runtime/API path** — **完成**：`claw doctor --help`、`claw status --help`、`claw sandbox --help`，以及巢狀 `mcp`/`skills` help 現在都可在本地攔截，不需啟動 runtime/provider，且有 regression tests 覆蓋 direct CLI paths
+20. **Session state classification gap（working / blocked / finished / truly stale）** — **完成**：agent manifests 現在可推導 `working`、`blocked_background_job`、`blocked_merge_conflict`、`degraded_mcp`、`interrupted_transport`、`finished_pending_report`、`finished_cleanable` 等 machine states；terminal-state persistence 也會記錄 commit provenance 與 derived state，讓下游 monitoring 能區分安靜進展與真正閒置
+21. **Resumed `/status` JSON parity gap** — dogfooding 顯示 fresh `claw status --output-format json` 已輸出 structured JSON，但 resumed slash-command status 在至少一條 dispatch path 中仍會漏回 text-shaped path。local CI-equivalent repro 在 `rust/crates/rusty-claude-cli/tests/resume_slash_commands.rs::resumed_status_command_emits_structured_json_when_requested` 失敗，錯誤為 `expected value at line 1 column 1`，因此 resumed 狀態輸出一致性仍待修補
+22. **Worktree binding semantics** — sessions 預設會繼承 parent 的 workspace root；若要切到新 worktree，必須明確 re-bind，而且這個 re-bind 本身也應被記錄為 structured event，以便 orchestrator 稽核 cross-worktree handoffs  
+    - 額外需要暴露 `branch.workspace_mismatch` lane event，讓 clawhip 不再把錯誤 CWD 下的寫入誤算為 lane completion  
+    **目前狀態：** `Session` 已在 `rust/crates/runtime/src/session.rs` 中新增 `workspace_root` 欄位，並完成 builder、accessor、JSON + JSONL round-trip、fork inheritance，以及 `persists_workspace_root_round_trip_and_forks_inherit_it` 的 given/when/then test coverage。CWD validation、namespaced on-disk path 與 `branch.workspace_mismatch` lane event 仍待完成，並持續掛在這個項目下。
 
 **P3 — Swarm efficiency**
-13. Swarm branch-lock protocol — **done**: `branch_lock::detect_branch_lock_collisions()` now detects same-branch/same-scope and nested-module collisions before parallel lanes drift into duplicate implementation
-14. Commit provenance / worktree-aware push events — **done**: lane event provenance now includes branch/worktree/superseded/canonical lineage metadata, and manifest persistence de-dupes superseded commit events before downstream consumers render them
+13. Swarm branch-lock protocol — **完成**：`branch_lock::detect_branch_lock_collisions()` 現在能在 parallel lanes 漂移成重複實作前，先偵測 same-branch/same-scope 與 nested-module collisions
+14. Commit provenance / worktree-aware push events — **完成**：lane event provenance 現在包含 branch/worktree/superseded/canonical lineage metadata；manifest persistence 也會在下游 consumers 渲染前先去除 superseded commit events
 
-## Suggested Session Split
+## 建議的 Session 拆分
 
 ### Session A — worker boot protocol
-Focus:
+重點：
+
 - trust prompt detection
 - ready-for-prompt handshake
 - prompt misdelivery detection
 
 ### Session B — clawhip lane events
-Focus:
+重點：
+
 - canonical lane event schema
 - failure taxonomy
 - summary compression
 
 ### Session C — branch/test intelligence
-Focus:
+重點：
+
 - stale-branch detection
 - green-level contract
 - recovery recipes
 
 ### Session D — MCP lifecycle hardening
-Focus:
+重點：
+
 - startup/handshake reliability
 - structured failed server reporting
 - degraded-mode runtime behavior
 - lifecycle tests/harness coverage
 
 ### Session E — typed task packets + policy engine
-Focus:
+重點：
+
 - structured task format
 - retry/merge/escalation rules
 - autonomous lane closure behavior
 
-## MVP Success Criteria
+## MVP 成功標準
 
-We should consider claw-code materially more clawable when:
-- a claw can start a worker and know with certainty when it is ready
-- claws no longer accidentally type tasks into the shell
-- stale-branch failures are identified before they waste debugging time
-- clawhip reports machine states, not just tmux prose
-- MCP/plugin startup failures are classified and surfaced cleanly
-- a coding lane can self-recover from common startup and branch issues without human babysitting
+當以下條件成立時，我們就可以認為 claw-code 在實質上變得更 clawable：
 
-## Short Version
+- claw 可以啟動 worker，且能確定它何時 ready
+- claws 不再把 tasks 誤打到 shell 裡
+- stale-branch failures 能在浪費除錯時間前先被辨識
+- clawhip 回報 machine states，而不只是 tmux prose
+- MCP/plugin startup failures 被清楚分類並暴露
+- coding lane 能在不需要人工 babysitting 的情況下，自行從常見 startup 與 branch 問題恢復
 
-claw-code should evolve from:
-- a CLI a human can also drive
+## 短版結論
 
-to:
-- a **claw-native execution runtime**
-- an **event-native orchestration substrate**
-- a **plugin/hook-first autonomous coding harness**
+claw-code 應從：
 
-## Deployment Architecture Gap (filed from dogfood 2026-04-08)
+- 一個人類也能操作的 CLI
 
-### WorkerState is in the runtime; /state is NOT in opencode serve
+演進為：
 
-**Root cause discovered during batch 8 dogfood.**
+- 一個 **claw-native execution runtime**
+- 一個 **event-native orchestration substrate**
+- 一個 **plugin/hook-first autonomous coding harness**
 
-`worker_boot.rs` has a solid `WorkerStatus` state machine (`Spawning → TrustRequired → ReadyForPrompt → Running → Finished/Failed`). It is exported from `runtime/src/lib.rs` as a public API. But claw-code is a **plugin** loaded inside the `opencode` binary — it cannot add HTTP routes to `opencode serve`. The HTTP server is 100% owned by the upstream opencode process (v1.3.15).
+## Deployment Architecture Gap（來自 2026-04-08 dogfood）
 
-**Impact:** There is no way to `curl localhost:4710/state` and get back a JSON `WorkerStatus`. Any such endpoint would require either:
-1. Upstreaming a `/state` route into opencode's HTTP server (requires a PR to sst/opencode), or
-2. Writing a sidecar HTTP process that queries the `WorkerRegistry` in-process (possible but fragile), or
-3. Writing `WorkerStatus` to a well-known file path (`.claw/worker-state.json`) that an external observer can poll.
+### WorkerState 在 runtime 中；但 `/state` 不在 opencode serve 中
 
-**Recommended path:** Option 3 — emit `WorkerStatus` transitions to `.claw/worker-state.json` on every state change. This is purely within claw-code's plugin scope, requires no upstream changes, and gives clawhip a file it can poll to distinguish a truly stalled worker from a quiet-but-progressing one.
+**這是在 batch 8 dogfood 中發現的 root cause。**
 
-**Action item:** Wire `WorkerRegistry::transition()` to atomically write `.claw/worker-state.json` on every state transition. Add a `claw state` CLI subcommand that reads and prints this file. Add regression test.
+`worker_boot.rs` 有一套完整的 `WorkerStatus` state machine（`Spawning → TrustRequired → ReadyForPrompt → Running → Finished/Failed`）。它也從 `runtime/src/lib.rs` 作為 public API 匯出。但 claw-code 是載入在 `opencode` binary 內部的 **plugin**，它無法替 `opencode serve` 新增 HTTP routes。HTTP server 完全由上游 `opencode` process（v1.3.15）擁有。
 
-**Prior session note:** A previous session summary claimed commit `0984cca` landed a `/state` HTTP endpoint via axum. This was incorrect — no such commit exists on main, axum is not a dependency, and the HTTP server is not ours. The actual work that exists: `worker_boot.rs` with `WorkerStatus` enum + `WorkerRegistry`, fully wired into `runtime/src/lib.rs` as public exports.
+**影響：** 目前沒有辦法用 `curl localhost:4710/state` 直接拿到 JSON `WorkerStatus`。若要有這種 endpoint，必須符合下列其中一種方式：
+1. 把 `/state` route upstream 到 opencode 的 HTTP server（需要對 `sst/opencode` 發 PR），或
+2. 寫一個 sidecar HTTP process，在 process 內查詢 `WorkerRegistry`（可行，但脆弱），或
+3. 把 `WorkerStatus` 寫到固定檔案路徑（`.claw/worker-state.json`），供外部 observer 輪詢
 
-## Startup Friction Gap: No Default trusted_roots in Settings (filed 2026-04-08)
+**建議路徑：** 選項 3 —— 在每次狀態變更時，把 `WorkerStatus` 發射到 `.claw/worker-state.json`。這完全落在 claw-code plugin 的能力範圍內，不需上游修改，也能讓 clawhip 透過輪詢檔案來區分真正卡住的 worker 與安靜但仍在前進的 worker。
 
-### Every lane starts with manual trust babysitting unless caller explicitly passes roots
+**行動項目：** 將 `WorkerRegistry::transition()` 接上原子寫入 `.claw/worker-state.json`。新增 `claw state` CLI subcommand 來讀取並印出這個檔案。補上 regression test。
 
-**Root cause discovered during direct dogfood of WorkerCreate tool.**
+**先前 session 的錯誤說法：** 曾有一份 session summary 宣稱 commit `0984cca` 已透過 axum 落地 `/state` HTTP endpoint。這是不正確的：`main` 上不存在這個 commit，axum 也不是 dependency，而且 HTTP server 不是我們的。真實已存在的工作是：`worker_boot.rs` 中的 `WorkerStatus` enum + `WorkerRegistry`，並已完整接入 `runtime/src/lib.rs` 作為 public exports。
 
-`WorkerCreate` accepts a `trusted_roots: Vec<String>` parameter. If the caller omits it (or passes `[]`), every new worker immediately enters `TrustRequired` and stalls — requiring manual intervention to advance to `ReadyForPrompt`. There is no mechanism to configure a default allowlist in `settings.json` or `.claw/settings.json`.
+## Startup Friction Gap：Settings 中沒有預設 trusted_roots（記錄於 2026-04-08）
 
-**Impact:** Batch tooling (clawhip, lane orchestrators) must pass `trusted_roots` explicitly on every `WorkerCreate` call. If a batch script forgets the field, all workers in that batch stall silently at `trust_required`. This was the root cause of several "batch 8 lanes not advancing" incidents.
+### 除非呼叫端顯式傳 roots，否則每條 lane 都會從人工 trust babysitting 開始
 
-**Recommended fix:**
-1. Add a `trusted_roots` field to `RuntimeConfig` (or a nested `[trust]` table), loaded via `ConfigLoader`.
-2. In `WorkerRegistry::spawn_worker()`, merge config-level `trusted_roots` with any per-call overrides.
-3. Default: empty list (safest). Users opt in by adding their repo paths to settings.
-4. Update `config_validate` schema with the new field.
+**這是在直接 dogfood WorkerCreate tool 時發現的 root cause。**
 
-**Action item:** Wire `RuntimeConfig::trusted_roots()` → `WorkerRegistry::spawn_worker()` default. Cover with test: config with `trusted_roots = ["/tmp"]` → spawning worker in `/tmp/x` auto-resolves trust without caller passing the field.
+`WorkerCreate` 接受 `trusted_roots: Vec<String>` 參數。如果呼叫端省略它（或傳 `[]`），每個新 worker 都會立刻進入 `TrustRequired` 並停住，必須人工干預才會進到 `ReadyForPrompt`。現在沒有任何機制可以在 `settings.json` 或 `.claw/settings.json` 中設定預設 allowlist。
 
-## Observability Transport Decision (filed 2026-04-08)
+**影響：** batch tooling（clawhip、lane orchestrators）必須在每次 `WorkerCreate` 呼叫時都顯式傳入 `trusted_roots`。如果 batch script 忘了帶這個欄位，該批所有 workers 都會默默卡在 `trust_required`。這正是多次「batch 8 lanes 沒有前進」事故的 root cause。
 
-### Canonical state surface: CLI/file-based. HTTP endpoint deferred.
+**建議修復：**
+1. 在 `RuntimeConfig` 中新增 `trusted_roots` 欄位（或巢狀 `[trust]` table），並透過 `ConfigLoader` 載入
+2. 在 `WorkerRegistry::spawn_worker()` 中，把 config-level `trusted_roots` 與每次呼叫的 overrides 合併
+3. 預設值維持空列表（最安全）；由使用者自行在 settings 中加入 repo paths 以 opt in
+4. 更新 `config_validate` schema，納入新欄位
 
-**Decision:** `claw state` reading `.claw/worker-state.json` is the **blessed observability contract** for clawhip and downstream tooling. This is not a stepping-stone — it is the supported surface. Build against it.
+**行動項目：** 將 `RuntimeConfig::trusted_roots()` 接到 `WorkerRegistry::spawn_worker()` 的預設邏輯。補上測試：若 config 中有 `trusted_roots = ["/tmp"]`，則在 `/tmp/x` 啟動 worker 時，即使呼叫端沒傳這個欄位，也能 auto-resolve trust。
 
-**Rationale:**
-- claw-code is a plugin running inside the opencode binary. It cannot add HTTP routes to `opencode serve` — that server belongs to upstream sst/opencode.
-- The file-based surface is fully within plugin scope: `emit_state_file()` in `worker_boot.rs` writes atomically on every `WorkerStatus` transition.
-- `claw state --output-format json` gives clawhip everything it needs: `status`, `is_ready`, `seconds_since_update`, `trust_gate_cleared`, `last_event`, `updated_at`.
-- Polling a local file has lower latency and fewer failure modes than an HTTP round-trip to a sidecar.
-- An HTTP state endpoint would require either (a) upstreaming a route to sst/opencode — a multi-week PR cycle with no guarantee of acceptance — or (b) a sidecar process that queries `WorkerRegistry` in-process, which is fragile and adds an extra failure domain.
+## Observability Transport Decision（記錄於 2026-04-08）
 
-**What downstream tooling (clawhip) should do:**
-1. After `WorkerCreate`, poll `.claw/worker-state.json` (or run `claw state --output-format json`) in the worker's CWD at whatever interval makes sense (e.g. 5s).
-2. Trust `seconds_since_update > 60` in `trust_required` status as the stall signal.
-3. Call `WorkerResolveTrust` tool to unblock, or `WorkerRestart` to reset.
+### Canonical state surface：CLI/file-based。HTTP endpoint 延後。
 
-**HTTP endpoint tracking:** Not scheduled. If a concrete use case emerges that file polling cannot serve (e.g. remote workers over a network boundary), open a new issue to upstream a `/worker/state` route to sst/opencode at that time. Until then: file/CLI is canonical.
+**決策：** `claw state` 讀取 `.claw/worker-state.json` 是 clawhip 與下游工具的**正式 observability contract**。這不是過渡方案，而是受支持的 surface。請直接以它為基礎建構。
+
+**理由：**
+
+- claw-code 是在 opencode binary 內運作的 plugin，無法替 `opencode serve` 增加 HTTP routes；那個 server 屬於上游 `sst/opencode`
+- file-based surface 完全落在 plugin 能力範圍內：`worker_boot.rs` 的 `emit_state_file()` 會在每次 `WorkerStatus` transition 時做原子寫入
+- `claw state --output-format json` 已提供 clawhip 所需的全部資訊：`status`、`is_ready`、`seconds_since_update`、`trust_gate_cleared`、`last_event`、`updated_at`
+- 輪詢本地檔案的延遲更低，失敗模式也比打 sidecar HTTP round-trip 更少
+- 若要有 HTTP state endpoint，不是要 upstream 一條 route 到 `sst/opencode`（可能要數週 PR cycle，且不保證會被接受），就是要做一個 sidecar process 去 in-process 查 `WorkerRegistry`，這兩者都更脆弱，還增加額外 failure domain
+
+**下游工具（clawhip）應如何使用：**
+1. 在 `WorkerCreate` 後，於 worker 的 CWD 輪詢 `.claw/worker-state.json`（或執行 `claw state --output-format json`），輪詢間隔可自行決定，例如 5 秒
+2. 若 `trust_required` 狀態下的 `seconds_since_update > 60`，就視為 stall signal
+3. 呼叫 `WorkerResolveTrust` tool 解除阻塞，或呼叫 `WorkerRestart` 重置
+
+**HTTP endpoint tracking：** 目前未排程。若未來出現 file polling 無法滿足的具體 use case（例如遠端 workers 跨 network boundary），再另開 issue，把 `/worker/state` route upstream 到 `sst/opencode`。在那之前：file/CLI 就是 canonical。

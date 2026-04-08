@@ -1,122 +1,126 @@
 # 🚀 Mini-Agent System
 
 <p align="center">
-  <strong>Exploring Lightweight Agent Loops for AI-Assisted Development</strong>
+  <strong>探索用於 AI 輔助開發的輕量代理循環</strong>
 </p>
 
 ---
 
-## 🧠 Overview
+## 🧠 概述
 
-Mini-Agent System is an experimental repository focused on designing and validating **lightweight agent workflows** for software development.
+Mini-Agent System 是一個實驗性儲存庫，聚焦於為軟體開發設計與驗證**輕量代理工作流**。
 
-The goal is not to build a fully autonomous system, but to explore a **controlled, evaluation-driven loop** that enhances reliability, iteration speed, and system-level thinking.
-
----
-
-## 🎯 Objectives
-
-- Investigate practical agent design patterns
-- Build reproducible **generate → evaluate → refine** workflows
-- Validate AI-assisted development under controlled constraints
-- Maintain human-in-the-loop decision making
+它的目標不是打造一個完全自治的系統，而是探索一個**受控、評估驅動的循環**，藉此提升可靠性、迭代速度與系統層級思維。
 
 ---
 
-## ⚙️ Core Concept
+## 🎯 目標
 
-At the center of this repository is a minimal agent loop:
+- 研究實用的代理設計模式
+- 建立可重現的 **generate → evaluate → refine** 工作流
+- 在受控約束下驗證 AI 輔助開發
+- 維持 human-in-the-loop 的決策模式
+
+---
+
+## ⚙️ 核心概念
+
+這個儲存庫的中心是一個最小化的代理循環：
+
 Task → Generate → Evaluate → Refine
-This loop enables:
 
-- Iterative improvement of outputs
-- Evaluation-guided refinement
-- Controlled automation without loss of oversight
+這個循環帶來：
 
----
-
-## 🤖 Agent Model (Lightweight)
-
-This system follows a **minimal agent abstraction**, focusing on simplicity and extensibility:
-
-- Task-driven execution
-- Evaluation as a first-class component
-- Feedback-based refinement
-- No hidden autonomous orchestration
-
-This is intentionally designed to remain:
-
-- 🔒 Controlled
-- 🧩 Modular
-- 🧠 Transparent
+- 對輸出的迭代式改進
+- 由評估引導的 refinement
+- 在不失去監督的前提下實現受控自動化
 
 ---
 
-## 🧪 Research Scope
+## 🤖 代理模型（輕量）
 
-This repository explores:
+這個系統採用**最小代理抽象**，重點放在簡潔性與可擴充性：
 
-- Agent loop design
-- Evaluation strategies and metrics
-- Prompt-driven generation workflows
-- Error handling and refinement cycles
-- System behavior under iterative feedback
+- 以任務為驅動的執行方式
+- 將 evaluation 作為一級核心能力
+- 以回饋為基礎的 refinement
+- 不隱藏自治式 orchestration
 
-It serves as a **sandbox for experimentation**, not a production-ready system.
+它被刻意設計成持續保持：
+
+- 🔒 受控
+- 🧩 模組化
+- 🧠 透明
+
+---
+
+## 🧪 研究範圍
+
+這個儲存庫探索：
+
+- 代理循環設計
+- 評估策略與指標
+- 以 prompt 驅動的生成工作流
+- 錯誤處理與 refinement cycles
+- 在反覆回饋下的系統行為
+
+它是一個**實驗沙盒**，不是 production-ready 系統。
 
 ---
 
 ## 📦 Repository Structure
+
 .
-├── src/        # Core logic and experimental implementations
-├── tests/      # Validation and evaluation tests
-├── docs/       # Design notes and research artifacts
-└── assets/     # Supporting materials
+├── src/        # 核心邏輯與實驗性實作
+├── tests/      # 驗證與評估測試
+├── docs/       # 設計筆記與研究產物
+└── assets/     # 輔助材料
+
 ---
 
-## 🚀 Usage (Experimental)
+## 🚀 使用方式（實驗性）
 
-Example workflow:
+範例工作流：
 
 ```bash
-# run experimental agent loop
+# 執行實驗性的代理循環
 python -m src.main
 ```
 
-Outputs and behavior may change as the system evolves.
+系統持續演進中，輸出與行為未來可能會變更。
 
 ⸻
 
-📈 Current Status
-	•	🧪 Early-stage experimental system
-	•	⚙️ Core loop under active refinement
-	•	🔍 Focus on evaluation-driven iteration
+📈 目前狀態
+	•	🧪 早期實驗階段系統
+	•	⚙️ 核心循環持續 refinement 中
+	•	🔍 聚焦於 evaluation-driven iteration
 
 ⸻
 
-🔭 Roadmap
-	•	Stabilize agent loop abstraction
-	•	Improve evaluation mechanisms
-	•	Introduce modular task definitions
-	•	Expand experimentation scenarios
+🔭 路線圖
+	•	穩定代理循環抽象
+	•	改進 evaluation 機制
+	•	引入模組化任務定義
+	•	擴充實驗情境
 
 ⸻
 
-⚠️ Disclaimer
+⚠️ 聲明
 
-This repository is intended for research and experimentation purposes only.
+此儲存庫僅供研究與實驗用途。
 
-It does not represent a fully autonomous system, and avoids exposing detailed implementation strategies.
-
-⸻
-
-🧠 Philosophy
-
-The goal is not to replace developers, but to explore:
-
-How far a simple, controlled agent loop can go in improving development workflows.
+它不代表完整自治系統，且刻意避免暴露細節過多的實作策略。
 
 ⸻
 
-👨‍💻 Author
-	•	Heinnrici — System Exploration & Development
+🧠 哲學
+
+目標不是取代開發者，而是探索：
+
+一個簡單、受控的代理循環，最遠能把開發工作流改善到什麼程度。
+
+⸻
+
+👨‍💻 作者
+	•	Heinnrici — 系統探索與開發
