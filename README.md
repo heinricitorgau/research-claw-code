@@ -2,6 +2,51 @@
 
 一個以實驗為核心的 repository，用來研究：**最小化 agent loop 是否能在受控條件下改善軟體開發流程。**
 
+## 使用方式
+
+這個 repo 目前提供一套「可離線直接跑」的本地 AI 啟動流程。
+
+### 1. 第一次準備離線 bundle
+
+在有網路的機器上執行：
+
+```bash
+cd ~/Desktop/research-claw-code
+bash deploy_local.sh
+```
+
+這一步會：
+
+- 建置 `claw` CLI
+- 準備本地 `ollama` 執行檔
+- 下載並打包模型快取
+- 產生 `local_ai/runtime/` 離線執行環境
+
+### 2. 之後離線直接啟動
+
+```bash
+cd ~/Desktop/research-claw-code
+bash local_ai/run.sh
+```
+
+一次性問句也可以直接跑：
+
+```bash
+bash local_ai/run.sh --output-format text prompt "幫我解釋這個 repo"
+```
+
+### 3. 搬到另一台電腦
+
+把整個 `research-claw-code` 資料夾連同 `local_ai/runtime/` 一起複製過去即可。
+
+注意：
+
+- 不需要另外安裝 `ollama`
+- 在 macOS 上不需要另外安裝 Python，launcher 會使用系統自帶的 `/usr/bin/python3`
+- 目前 bundle 是「同作業系統、同 CPU 架構」可攜，例如 `macOS arm64 -> macOS arm64`
+
+更完整的部署說明請看 [local_ai/README.md](./local_ai/README.md)。
+
 ## 研究問題
 
 > **在保持可控性、可觀測性與可評估性的前提下，最小代理循環究竟能走多遠？**
@@ -54,7 +99,7 @@ Task -> Generate -> Evaluate -> Refine -> Repeat
 └── assets/     # 輔助材料
 ```
 
-## 如何執行
+## 研究模式執行
 
 ```bash
 python -m src.main
