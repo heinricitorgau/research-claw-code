@@ -34,7 +34,7 @@ ok "removed repo bundle: ${RUNTIME_DIR}"
 
 cat <<EOF
 
-已刪除由 deploy_local.sh / prepare_bundle.sh 建立的 repo 內離線 bundle。
+已刪除由 local_ai/deploy_local.sh / local_ai/prepare_bundle.sh 建立的 repo 內離線 bundle。
 釋放空間：約 ${bundle_size}
 
 注意：

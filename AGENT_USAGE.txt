@@ -17,12 +17,12 @@ research-claw-code agent usage
 macOS / Linux:
 
 cd ~/Desktop/research-claw-code
-bash deploy_local.sh
+bash local_ai/deploy_local.sh
 
 Windows PowerShell:
 
 Set-Location ~/Desktop/research-claw-code
-powershell -ExecutionPolicy Bypass -File .\deploy_local.ps1
+powershell -ExecutionPolicy Bypass -File .\local_ai\deploy_local.ps1
 
 如果下載時間很短，可以改用快速模式：
 
@@ -106,11 +106,11 @@ powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1 --output-format text
 
 macOS / Linux:
 
-bash cleanup_local.sh
+bash local_ai/cleanup_local.sh
 
 Windows PowerShell:
 
-powershell -ExecutionPolicy Bypass -File .\cleanup_local.ps1
+powershell -ExecutionPolicy Bypass -File .\local_ai\cleanup_local.ps1
 
 九、注意事項
 

@@ -184,7 +184,7 @@ require_runtime_hint() {
     printf "\n"
     printf "需要先準備離線 bundle，才能保證「下載資料夾後直接跑」。\n\n"
     printf "先在有網路的機器上執行：\n"
-    printf "  bash deploy_local.sh\n\n"
+    printf "  bash local_ai/deploy_local.sh\n\n"
     printf "完成後會把 claw、ollama 與模型快取打包進：\n"
     printf "  %s\n\n" "$RUNTIME_DIR"
     printf "之後把整個 research-claw-code 資料夾搬到離線機器，就能直接：\n"

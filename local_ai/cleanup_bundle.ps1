@@ -41,7 +41,7 @@ Remove-Item -Path $runtimeDir -Recurse -Force
 Write-Ok "removed repo bundle: $runtimeDir"
 
 Write-Host ""
-Write-Host "已刪除由 deploy_local.ps1 / prepare_bundle.ps1 建立的 repo 內離線 bundle。"
+Write-Host "已刪除由 local_ai/deploy_local.ps1 / local_ai/prepare_bundle.ps1 建立的 repo 內離線 bundle。"
 Write-Host "釋放空間：約 $bundleSize"
 Write-Host ""
 Write-Host "注意："

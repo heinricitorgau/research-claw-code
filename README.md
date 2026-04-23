@@ -7,6 +7,8 @@
 
 如果你現在的目標是「下載資料夾後，離線直接問問題」，請先看下面的離線 bundle 流程。
 
+離線 bundle 相關入口腳本現在都集中在 `local_ai/`。
+
 ## 離線 bundle 快速開始
 
 ### 1. 在有網路的機器準備 bundle
@@ -15,14 +17,14 @@ macOS / Linux:
 
 ```bash
 cd ~/Desktop/research-claw-code
-bash deploy_local.sh
+bash local_ai/deploy_local.sh
 ```
 
 Windows PowerShell：
 
 ```powershell
 Set-Location ~/Desktop/research-claw-code
-powershell -ExecutionPolicy Bypass -File .\deploy_local.ps1
+powershell -ExecutionPolicy Bypass -File .\local_ai\deploy_local.ps1
 ```
 
 這一步會：
@@ -132,13 +134,13 @@ Windows 上尤其建議把 `/multiline` 當主要方案。
 macOS / Linux:
 
 ```bash
-bash cleanup_local.sh
+bash local_ai/cleanup_local.sh
 ```
 
 Windows PowerShell：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\cleanup_local.ps1
+powershell -ExecutionPolicy Bypass -File .\local_ai\cleanup_local.ps1
 ```
 
 這只會刪除 repo 內的 `local_ai/runtime/`，不會動到 `~/.ollama` 的全域模型快取。
@@ -172,7 +174,7 @@ $env:CLAW_SYSTEM_PROMPT="請全程使用繁體中文，回答精簡一點"; powe
 - 重新啟動時若舊 proxy/ollama 還占著 port，Windows 與 macOS / Linux 都會等最多 10 秒嘗試釋放 port 再接手
 - macOS launcher 會優先使用系統自帶的 `/usr/bin/python3`
 - Windows launcher 會優先尋找 `python`、`python3` 或 `py`
-- `deploy_local.sh` 與 `deploy_local.ps1` 都會在結束時印出總耗時
+- `local_ai/deploy_local.sh` 與 `local_ai/deploy_local.ps1` 都會在結束時印出總耗時
 - 若主要用途是解 C 題，建議優先用 `qwen2.5-coder:14b`；機器較吃緊時再考慮 `qwen2.5-coder:7b`
 
 ## 專案結構

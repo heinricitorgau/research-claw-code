@@ -6,7 +6,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SECONDS=0
 
-bash "$SCRIPT_DIR/local_ai/prepare_bundle.sh" "$@"
+bash "$SCRIPT_DIR/prepare_bundle.sh" "$@"
 
 elapsed_seconds=$SECONDS
 hours=$((elapsed_seconds / 3600))
