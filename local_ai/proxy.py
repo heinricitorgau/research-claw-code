@@ -9,18 +9,22 @@ claw 以 Anthropic 格式呼叫 → 本代理轉換 → Ollama 本地模型回�
 → 轉回 Anthropic 格式 → claw 收到回應
 
 用法（通常由 run.sh 呼叫）：
-    python3 local_ai/proxy.py --model llama3.2 --port 8082 --ollama-url http://localhost:11434
+    python3 local_ai/proxy.py --model qwen2.5-coder:14b --port 8082 --ollama-url http://localhost:11434
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
@@ -28,7 +32,7 @@ from urllib.request import Request, urlopen
 
 DEFAULT_PORT = 8082
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
-DEFAULT_MODEL = "llama3.2"
+DEFAULT_MODEL = "qwen2.5-coder:14b"
 DEFAULT_SYSTEM_PROMPT = (
     "你是離線終端機助理。"
     "請全程只使用繁體中文回答，不要混用英文、日文、韓文、越南文或其他語言。"
@@ -75,6 +79,151 @@ LANGUAGE_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("go", ("golang", "go language", " in go")),
     ("rust", ("rust",)),
 )
+
+MAX_C_REPAIR_ATTEMPTS = 2
+C_FORBIDDEN_PATTERNS: tuple[tuple[str, str], ...] = (
+    (r"\bstd::", "包含 C++ 命名空間 std::"),
+    (r"\bcout\s*<<", "使用了 C++ 的 cout"),
+    (r"\bcin\s*>>", "使用了 C++ 的 cin"),
+    (r"\bclass\b", "使用了 C++ 的 class"),
+    (r"\btemplate\s*<", "使用了 C++ 的 template"),
+    (r"\bnamespace\b", "使用了 C++ 的 namespace"),
+    (r"\bauto\b", "使用了 C++ 的 auto"),
+    (r"\bvector\s*<", "使用了 C++ 的 vector"),
+    (r"\bstring\b", "使用了 C++ string 型別"),
+    (r"\.\.\.", "出現了 ...，疑似 C++ fold expression 或其他不合法內容"),
+)
+FUNCTION_DEF_PATTERN = re.compile(
+    r"^\s*(?:static\s+)?(?:unsigned\s+|signed\s+|long\s+|short\s+)*"
+    r"(?:void|int|double|float|char|size_t|bool|struct\s+\w+)\s+"
+    r"(?P<name>[A-Za-z_]\w*)\s*\([^;{}]*\)\s*\{",
+    re.MULTILINE,
+)
+FUNCTION_PROTO_PATTERN = re.compile(
+    r"^\s*(?:static\s+)?(?:unsigned\s+|signed\s+|long\s+|short\s+)*"
+    r"(?:void|int|double|float|char|size_t|bool|struct\s+\w+)\s+"
+    r"(?P<name>[A-Za-z_]\w*)\s*\([^;{}]*\)\s*;",
+    re.MULTILINE,
+)
+CALL_PATTERN = re.compile(r"\b([A-Za-z_]\w*)\s*\(")
+CONTROL_KEYWORDS = {
+    "if", "for", "while", "switch", "return", "sizeof",
+}
+KNOWN_LIBRARY_CALLS = {
+    "printf", "scanf", "fprintf", "fscanf", "snprintf", "puts", "gets",
+    "malloc", "calloc", "realloc", "free", "exit", "pow", "sqrt", "fabs",
+    "strlen", "strcpy", "strcmp", "fopen", "fclose", "fgets", "fputs",
+}
+
+
+def _looks_like_series_math_program(user_text: str) -> bool:
+    lowered = user_text.lower()
+    series_markers = (
+        "1/1!",
+        "2^2",
+        "n^2",
+        "factorial",
+        "階乘",
+        "級數",
+        "series",
+    )
+    return any(marker in lowered for marker in series_markers)
+
+
+def _check_series_math_c_code(user_text: str, text: str) -> tuple[bool, str]:
+    if not _looks_like_series_math_program(user_text):
+        return True, ""
+
+    code = _extract_code_block(text, "c")
+    normalized = re.sub(r"\s+", " ", code)
+
+    has_factorial = (
+        "factorial(" in code
+        or re.search(r"\b(?:fact|fac)\b", code)
+        or re.search(r"\bproduct\b", code)
+    )
+    if not has_factorial:
+        return False, "這題是階乘級數，但程式中看不到 factorial 或等價的階乘計算"
+
+    has_square_sum = (
+        re.search(r"\+=\s*[A-Za-z_]\w*\s*\*\s*[A-Za-z_]\w*", code)
+        or "pow(" in code
+    )
+    if not has_square_sum:
+        return False, "這題需要累加平方和，但程式中看不到 1^2 + 2^2 + ... 的累加邏輯"
+
+    has_alternating = bool(
+        re.search(r"\(-?1\)\s*\^\s*", normalized)
+        or re.search(r"%\s*2", normalized)
+        or re.search(r"&\s*1", normalized)
+        or re.search(r"if\s*\([^)]*%[^)]*2", normalized)
+    )
+    has_plus_equal = "+=" in code
+    has_minus_equal = "-=" in code
+    if not (has_alternating or (has_plus_equal and has_minus_equal)):
+        return False, "這題是交錯級數，但程式中看不到正負號交替的邏輯"
+
+    if not re.search(r"\bfor\s*\(", code):
+        return False, "這題通常需要迴圈逐項累加，但程式中看不到 for 迴圈"
+
+    return True, ""
+
+
+def _looks_like_score_distribution_program(user_text: str) -> bool:
+    lowered = user_text.lower()
+    markers = (
+        "score distribution",
+        "class average",
+        "scores between 0 and 100",
+        "show the score distribution",
+        "average",
+        "scores:",
+        "學生",
+        "成績",
+        "分布",
+        "平均",
+    )
+    return any(marker in lowered for marker in markers)
+
+
+def _check_score_distribution_c_code(user_text: str, text: str) -> tuple[bool, str]:
+    if not _looks_like_score_distribution_program(user_text):
+        return True, ""
+
+    code = _extract_code_block(text, "c")
+    lowered = code.lower()
+
+    if "hello, world" in lowered:
+        return False, "這題要求讀取成績並統計分布，不能輸出 Hello, World!"
+
+    if "scanf" not in code:
+        return False, "這題需要讀入 n 和成績，程式中看不到 scanf"
+
+    if "printf" not in code:
+        return False, "這題需要印出分布與平均，程式中看不到 printf"
+
+    if not re.search(r"\bfor\s*\(", code):
+        return False, "這題需要用迴圈讀入與統計，程式中看不到 for 迴圈"
+
+    has_average = (
+        "average" in lowered
+        or re.search(r"\bsum\b", lowered)
+        or re.search(r"/\s*n\b", lowered)
+    )
+    if not has_average:
+        return False, "這題需要計算平均，程式中看不到 sum/average 或除以 n 的邏輯"
+
+    has_distribution = (
+        re.search(r"/\s*10", code)
+        or re.search(r"\bcount\s*\[", lowered)
+        or re.search(r"\bbucket", lowered)
+        or re.search(r"\bhist", lowered)
+        or "100" in code
+    )
+    if not has_distribution:
+        return False, "這題需要依分數區間統計分布，程式中看不到分桶或區間計數邏輯"
+
+    return True, ""
 
 
 # ── Anthropic → OpenAI 格式轉換 ───────────────────────────────────────────────
@@ -140,6 +289,234 @@ def _programming_mode_instruction(user_text: str) -> str | None:
         f"請直接輸出一份完整、可執行的 {explicit_language} 程式。"
         "除非使用者明確要求說明，否則只輸出一個程式碼區塊，不要加前言、結語或多餘解釋。"
     )
+
+
+def _detect_programming_language(user_text: str) -> str | None:
+    if not _looks_like_programming_request(user_text):
+        return None
+    explicit_language = _detect_explicit_language(user_text)
+    if explicit_language is None:
+        return "c"
+    return explicit_language
+
+
+def _extract_code_block(text: str, language: str | None = None) -> str:
+    pattern = r"```(?P<lang>[^\n`]*)\n(?P<code>.*?)```"
+    matches = list(re.finditer(pattern, text, re.DOTALL))
+    if not matches:
+        return text.strip()
+
+    if language:
+        for match in matches:
+            fenced_lang = match.group("lang").strip().lower()
+            if fenced_lang == language.lower():
+                return match.group("code").strip()
+    return matches[0].group("code").strip()
+
+
+def _find_c_compiler() -> str | None:
+    for candidate in ("cc", "gcc", "clang"):
+        compiler = shutil.which(candidate)
+        if compiler:
+            return compiler
+    return None
+
+
+def _static_check_c_code(text: str) -> tuple[bool, str]:
+    code = _extract_code_block(text, "c")
+    for pattern, message in C_FORBIDDEN_PATTERNS:
+        if re.search(pattern, code):
+            return False, message
+
+    if not re.search(r"\bmain\s*\(", code):
+        return False, "缺少 main 函式"
+
+    defined_functions = {match.group("name") for match in FUNCTION_DEF_PATTERN.finditer(code)}
+    declared_functions = {match.group("name") for match in FUNCTION_PROTO_PATTERN.finditer(code)}
+
+    calls = set()
+    for match in CALL_PATTERN.finditer(code):
+        name = match.group(1)
+        if name in CONTROL_KEYWORDS:
+            continue
+        calls.add(name)
+
+    unresolved_calls = sorted(
+        name for name in calls
+        if name not in defined_functions
+        and name not in declared_functions
+        and name not in KNOWN_LIBRARY_CALLS
+    )
+    if unresolved_calls:
+        return False, f"可能有未宣告或未定義的函式：{', '.join(unresolved_calls[:6])}"
+
+    return True, ""
+
+
+def _compile_check_c_code(user_text: str, text: str) -> tuple[bool, str]:
+    static_ok, static_error = _static_check_c_code(text)
+    if not static_ok:
+        return False, static_error
+
+    code = _extract_code_block(text, "c")
+    if _looks_like_programming_request(user_text) and "hello, world" in code.lower():
+        return False, "這是作業題，不可以只回 Hello, World!"
+
+    semantic_ok, semantic_error = _check_series_math_c_code(user_text, text)
+    if not semantic_ok:
+        return False, semantic_error
+
+    score_ok, score_error = _check_score_distribution_c_code(user_text, text)
+    if not score_ok:
+        return False, score_error
+
+    compiler = _find_c_compiler()
+    if compiler is None:
+        return True, "no local C compiler found; skipped syntax check"
+
+    code = _extract_code_block(text, "c")
+    with tempfile.NamedTemporaryFile("w", suffix=".c", delete=False, encoding="utf-8") as handle:
+        handle.write(code)
+        path = handle.name
+
+    try:
+        result = subprocess.run(
+            [compiler, "-std=c11", "-fsyntax-only", path],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+    except Exception as exc:
+        return False, f"compile check failed to run: {exc}"
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+    if result.returncode == 0:
+        return True, ""
+    return False, (result.stderr or result.stdout).strip()
+
+
+def _ollama_api_chat_payload(oai_payload: dict) -> dict:
+    payload = {
+        "model": oai_payload["model"],
+        "messages": oai_payload.get("messages", []),
+        "stream": False,
+        "options": {},
+    }
+    if "temperature" in oai_payload:
+        payload["options"]["temperature"] = oai_payload["temperature"]
+    if "max_tokens" in oai_payload:
+        payload["options"]["num_predict"] = oai_payload["max_tokens"]
+    if not payload["options"]:
+        payload.pop("options")
+    return payload
+
+
+def _ollama_api_chat_to_openai_response(ollama_data: dict, model: str) -> dict:
+    content_text = ollama_data.get("message", {}).get("content", "")
+    done_reason = ollama_data.get("done_reason", "stop")
+    prompt_eval_count = ollama_data.get("prompt_eval_count", 0)
+    eval_count = ollama_data.get("eval_count", 0)
+    return {
+        "id": "chatcmpl_" + uuid.uuid4().hex[:24],
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": model,
+        "choices": [{
+            "index": 0,
+            "message": {"role": "assistant", "content": content_text},
+            "finish_reason": done_reason,
+        }],
+        "usage": {
+            "prompt_tokens": prompt_eval_count,
+            "completion_tokens": eval_count,
+            "total_tokens": prompt_eval_count + eval_count,
+        },
+    }
+
+
+def _request_ollama_completion(oai_payload: dict, ollama_url: str) -> dict:
+    non_streaming_payload = dict(oai_payload)
+    non_streaming_payload["stream"] = False
+    openai_req = Request(
+        f"{ollama_url}/v1/chat/completions",
+        data=json.dumps(non_streaming_payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": "Bearer ollama",
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(openai_req, timeout=120) as resp:
+            return json.loads(resp.read())
+    except HTTPError as exc:
+        if exc.code != 404:
+            raise
+
+    api_payload = _ollama_api_chat_payload(non_streaming_payload)
+    api_req = Request(
+        f"{ollama_url}/api/chat",
+        data=json.dumps(api_payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urlopen(api_req, timeout=120) as resp:
+        ollama_data = json.loads(resp.read())
+    return _ollama_api_chat_to_openai_response(ollama_data, oai_payload["model"])
+
+
+def _open_ollama_stream(oai_payload: dict, ollama_url: str):
+    """開啟一個對 Ollama /v1/chat/completions 的串流連線，回傳檔案物件。"""
+    streaming_payload = dict(oai_payload)
+    streaming_payload["stream"] = True
+    req = Request(
+        f"{ollama_url}/v1/chat/completions",
+        data=json.dumps(streaming_payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": "Bearer ollama",
+            "Accept": "text/event-stream",
+        },
+        method="POST",
+    )
+    return urlopen(req, timeout=120)
+
+
+def _repair_c_response(
+    user_text: str,
+    oai_payload: dict,
+    initial_response: dict,
+    ollama_url: str,
+) -> dict:
+    current_response = initial_response
+    for _ in range(MAX_C_REPAIR_ATTEMPTS):
+        content_text = current_response.get("choices", [{}])[0].get("message", {}).get("content", "")
+        ok, compile_error = _compile_check_c_code(user_text, content_text)
+        if ok:
+            return current_response
+
+        repair_messages = list(oai_payload.get("messages", []))
+        repair_messages.append({"role": "assistant", "content": content_text})
+        repair_messages.append({
+            "role": "user",
+            "content": (
+                "你上一個 C 程式無法通過語法檢查。"
+                "請依照以下錯誤重寫成符合題意、可編譯的標準 C11 程式。"
+                "只輸出一個 ```c 程式碼區塊，不要加任何解釋。\n\n"
+                f"檢查錯誤：\n{compile_error}"
+            ),
+        })
+        repair_payload = dict(oai_payload)
+        repair_payload["messages"] = repair_messages
+        repair_payload["stream"] = False
+        repair_payload["temperature"] = 0.0
+        current_response = _request_ollama_completion(repair_payload, ollama_url)
+    return current_response
 
 
 def anthropic_to_openai(body: dict, model: str, default_system_prompt: str | None = None) -> dict:
@@ -306,6 +683,45 @@ def stream_openai_to_anthropic(ollama_response, model: str):
     yield sse_line("message_stop", {"type": "message_stop"})
 
 
+def text_to_anthropic_sse(text: str, model: str):
+    msg_id = "msg_" + uuid.uuid4().hex[:24]
+
+    def sse_line(event: str, data: dict) -> bytes:
+        return f"event: {event}\ndata: {json.dumps(data)}\n\n".encode()
+
+    yield sse_line("message_start", {
+        "type": "message_start",
+        "message": {
+            "id": msg_id,
+            "type": "message",
+            "role": "assistant",
+            "content": [],
+            "model": model,
+            "stop_reason": None,
+            "stop_sequence": None,
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+        },
+    })
+    yield sse_line("content_block_start", {
+        "type": "content_block_start",
+        "index": 0,
+        "content_block": {"type": "text", "text": ""},
+    })
+    if text:
+        yield sse_line("content_block_delta", {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "text_delta", "text": text},
+        })
+    yield sse_line("content_block_stop", {"type": "content_block_stop", "index": 0})
+    yield sse_line("message_delta", {
+        "type": "message_delta",
+        "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+        "usage": {"output_tokens": max(1, len(text.split())) if text else 0},
+    })
+    yield sse_line("message_stop", {"type": "message_stop"})
+
+
 # ── HTTP 請求處理器 ───────────────────────────────────────────────────────────
 
 class ProxyHandler(BaseHTTPRequestHandler):
@@ -313,10 +729,21 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
     ollama_url: str = DEFAULT_OLLAMA_URL
     local_model: str = DEFAULT_MODEL
+    ollama_model: str = DEFAULT_MODEL
     default_system_prompt: str = DEFAULT_SYSTEM_PROMPT
 
     def log_message(self, fmt: str, *args) -> None:  # 簡化日誌
         sys.stderr.write(f"[proxy] {fmt % args}\n")
+
+    def _send_json_error(self, code: int, message: str) -> None:
+        body = json.dumps(
+            {"error": message}, ensure_ascii=False
+        ).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_GET(self) -> None:  # noqa: N802
         """健康檢查端點。"""
@@ -334,41 +761,53 @@ class ProxyHandler(BaseHTTPRequestHandler):
         try:
             body = json.loads(raw)
         except json.JSONDecodeError:
-            self.send_error(400, "Invalid JSON")
+            self._send_json_error(400, "Invalid JSON")
             return
 
         if self.path in ("/v1/messages",):
             self._handle_messages(body)
         else:
-            self.send_error(404, f"Unknown endpoint: {self.path}")
+            self._send_json_error(404, f"Unknown endpoint: {self.path}")
 
     def _handle_messages(self, body: dict) -> None:
         streaming = body.get("stream", False)
-        oai_payload = anthropic_to_openai(body, self.local_model, self.default_system_prompt)
-        oai_json = json.dumps(oai_payload).encode()
-
-        req = Request(
-            f"{self.ollama_url}/v1/chat/completions",
-            data=oai_json,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": "Bearer ollama",
-            },
-            method="POST",
-        )
+        latest_user_text = _latest_user_text(body)
+        oai_payload = anthropic_to_openai(body, self.ollama_model, self.default_system_prompt)
+        requested_language = _detect_programming_language(latest_user_text)
+        needs_c_repair = requested_language == "c"
 
         try:
             if streaming:
-                self._stream_response(req, body.get("model", self.local_model))
+                self._stream_response(
+                    body.get("model", self.local_model),
+                    oai_payload,
+                    needs_c_repair,
+                    latest_user_text,
+                )
             else:
-                self._sync_response(req, body.get("model", self.local_model))
+                self._sync_response(
+                    body.get("model", self.local_model),
+                    oai_payload,
+                    needs_c_repair,
+                    latest_user_text,
+                )
         except URLError as exc:
             sys.stderr.write(f"[proxy] Ollama 連線失敗：{exc}\n")
-            self.send_error(502, "Ollama 無法連線，請確認 Ollama 正在執行")
+            self._send_json_error(502, "Bad Gateway: cannot reach Ollama")
+        except HTTPError as exc:
+            sys.stderr.write(f"[proxy] Ollama HTTP 錯誤：{exc}\n")
+            self._send_json_error(502, f"Bad Gateway: Ollama returned HTTP {exc.code}")
 
-    def _sync_response(self, req: Request, model: str) -> None:
-        with urlopen(req, timeout=120) as resp:
-            oai_data = json.loads(resp.read())
+    def _sync_response(
+        self,
+        model: str,
+        oai_payload: dict,
+        needs_c_repair: bool,
+        user_text: str,
+    ) -> None:
+        oai_data = _request_ollama_completion(oai_payload, self.ollama_url)
+        if needs_c_repair:
+            oai_data = _repair_c_response(user_text, oai_payload, oai_data, self.ollama_url)
         result = openai_to_anthropic(oai_data, model)
         body_bytes = json.dumps(result).encode()
         self.send_response(200)
@@ -377,18 +816,57 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body_bytes)
 
-    def _stream_response(self, req: Request, model: str) -> None:
+    def _stream_response(
+        self,
+        model: str,
+        oai_payload: dict,
+        needs_c_repair: bool,
+        user_text: str,
+    ) -> None:
         self.send_response(200)
-        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
-        with urlopen(req, timeout=120) as resp:
-            try:
-                for chunk in stream_openai_to_anthropic(resp, model):
+        try:
+            if needs_c_repair:
+                # C 題會走本地檢查 + 重試路徑，需要完整文字才能檢驗，
+                # 因此這條路徑只能先取完整回覆再模擬 SSE。
+                oai_data = _request_ollama_completion(oai_payload, self.ollama_url)
+                oai_data = _repair_c_response(
+                    user_text, oai_payload, oai_data, self.ollama_url
+                )
+                content_text = (
+                    oai_data.get("choices", [{}])[0]
+                    .get("message", {})
+                    .get("content", "")
+                )
+                for chunk in text_to_anthropic_sse(content_text, model):
                     self.wfile.write(chunk)
                     self.wfile.flush()
-            except BrokenPipeError:
-                sys.stderr.write("[proxy] client disconnected during stream\n")
+                return
+
+            # 一般路徑：直接用 Ollama 的 SSE 串流轉成 Anthropic SSE。
+            try:
+                with _open_ollama_stream(oai_payload, self.ollama_url) as upstream:
+                    for chunk in stream_openai_to_anthropic(upstream, model):
+                        self.wfile.write(chunk)
+                        self.wfile.flush()
+            except HTTPError as exc:
+                if exc.code != 404:
+                    raise
+                # 舊版 Ollama 沒有 /v1/chat/completions，退回非串流再模擬 SSE。
+                oai_data = _request_ollama_completion(oai_payload, self.ollama_url)
+                content_text = (
+                    oai_data.get("choices", [{}])
+                    [0]
+                    .get("message", {})
+                    .get("content", "")
+                )
+                for chunk in text_to_anthropic_sse(content_text, model):
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+        except BrokenPipeError:
+            sys.stderr.write("[proxy] client disconnected during stream\n")
 
 
 # ── 主程式 ────────────────────────────────────────────────────────────────────
@@ -408,6 +886,7 @@ def wait_for_ollama(ollama_url: str, timeout: int = 30) -> bool:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Anthropic ↔ Ollama 代理")
     parser.add_argument("--model", default=DEFAULT_MODEL, help="Ollama 模型名稱")
+    parser.add_argument("--ollama-model", default=None, help="實際送給 Ollama 的模型名稱")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="代理監聽埠")
     parser.add_argument("--ollama-url", default=DEFAULT_OLLAMA_URL, help="Ollama 服務 URL")
     parser.add_argument(
@@ -419,6 +898,7 @@ def main() -> None:
 
     ProxyHandler.ollama_url = args.ollama_url
     ProxyHandler.local_model = args.model
+    ProxyHandler.ollama_model = args.ollama_model or args.model
     ProxyHandler.default_system_prompt = args.system_prompt
 
     sys.stderr.write(f"[proxy] 等待 Ollama 啟動（{args.ollama_url}）...\n")

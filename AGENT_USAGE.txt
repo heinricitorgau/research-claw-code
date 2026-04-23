@@ -10,6 +10,7 @@ research-claw-code agent usage
 - 預設用繁體中文回覆
 - 若要求寫程式但沒指定語言，預設輸出 C 語言程式
 - 預設直接輸出答案，不主動寫檔
+- 對 C 程式題，系統會先做本地語法與基本結構檢查；若明顯不是 C 或無法編譯，會要求模型重寫
 
 二、第一次準備離線 bundle
 
@@ -22,6 +23,26 @@ Windows PowerShell:
 
 Set-Location ~/Desktop/research-claw-code
 powershell -ExecutionPolicy Bypass -File .\deploy_local.ps1
+
+如果下載時間很短，可以改用快速模式：
+
+macOS / Linux:
+
+bash local_ai/prepare_bundle.sh --fast
+
+Windows PowerShell:
+
+powershell -ExecutionPolicy Bypass -File .\local_ai\prepare_bundle.ps1 --fast
+
+如果你不想在現場下載模型，只想用本機已經有的快取：
+
+macOS / Linux:
+
+bash local_ai/prepare_bundle.sh --cached-only
+
+Windows PowerShell:
+
+powershell -ExecutionPolicy Bypass -File .\local_ai\prepare_bundle.ps1 --cached-only
 
 三、離線啟動 agent
 
@@ -94,5 +115,8 @@ powershell -ExecutionPolicy Bypass -File .\cleanup_local.ps1
 九、注意事項
 
 - bundle 需要先在有網路的環境準備好
+- 若下載時間很短，優先考慮 `--fast`
+- 若現場完全不想下載模型，使用 `--cached-only`
 - local_ai/runtime/ 可能很大，因為模型會一起打包
 - 清理指令只會刪除 repo 內的 bundle，不會刪除全域模型快取
+- 目前預設模型建議使用 qwen2.5-coder:14b；如果機器較吃緊，再退到 qwen2.5-coder:7b

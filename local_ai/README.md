@@ -32,16 +32,16 @@ powershell -ExecutionPolicy Bypass -File .\deploy_local.ps1
 bash local_ai/prepare_bundle.sh
 ```
 
-預設模型是 `llama3.2`。若想指定別的模型：
+預設模型是 `qwen2.5-coder:14b`。若想指定別的模型：
 
 ```bash
-bash local_ai/prepare_bundle.sh codellama
+bash local_ai/prepare_bundle.sh qwen2.5-coder:14b
 ```
 
 Windows PowerShell：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\local_ai\prepare_bundle.ps1 codellama
+powershell -ExecutionPolicy Bypass -File .\local_ai\prepare_bundle.ps1 qwen2.5-coder:14b
 ```
 
 ### 之後離線啟動
@@ -134,7 +134,7 @@ bundled local model
 ## 常用環境變數
 
 ```bash
-CLAW_MODEL=llama3.2 bash local_ai/run.sh
+CLAW_MODEL=qwen2.5-coder:14b bash local_ai/run.sh
 CLAW_OLLAMA_PORT=11435 bash local_ai/run.sh
 CLAW_PERMISSION_MODE=read-only bash local_ai/run.sh
 CLAW_SYSTEM_PROMPT="請全程使用繁體中文，並用條列整理答案。" bash local_ai/run.sh
@@ -143,7 +143,7 @@ CLAW_SYSTEM_PROMPT="請全程使用繁體中文，並用條列整理答案。" b
 Windows PowerShell：
 
 ```powershell
-$env:CLAW_MODEL="llama3.2"; powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
+$env:CLAW_MODEL="qwen2.5-coder:14b"; powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
 $env:CLAW_OLLAMA_PORT="11435"; powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
 $env:CLAW_PERMISSION_MODE="read-only"; powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
 $env:CLAW_SYSTEM_PROMPT="請全程使用繁體中文，並用條列整理答案。"; powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1

@@ -15,19 +15,43 @@ powershell -ExecutionPolicy Bypass -File .\deploy_local.ps1
 
 這一步會：
 - 建置 claw CLI
-- 準備 bundled ollama 執行檔
-- 下載並打包模型快取
+- 打包 bundled ollama
+- 下載並封裝指定模型
 - 產生 local_ai/runtime/ 離線執行環境
+
+預設模型：
+
+qwen2.5-coder:14b
 
 若想指定模型：
 
-bash local_ai/prepare_bundle.sh codellama
+bash local_ai/prepare_bundle.sh qwen2.5-coder:14b
 
 Windows PowerShell：
 
-powershell -ExecutionPolicy Bypass -File .\local_ai\prepare_bundle.ps1 codellama
+powershell -ExecutionPolicy Bypass -File .\local_ai\prepare_bundle.ps1 qwen2.5-coder:14b
 
-2. 之後離線直接啟動
+若想盡量少下載、少重建：
+
+bash local_ai/prepare_bundle.sh --fast
+
+Windows PowerShell：
+
+powershell -ExecutionPolicy Bypass -File .\local_ai\prepare_bundle.ps1 --fast
+
+若只允許使用本機已快取模型：
+
+bash local_ai/prepare_bundle.sh --cached-only
+
+Windows PowerShell：
+
+powershell -ExecutionPolicy Bypass -File .\local_ai\prepare_bundle.ps1 --cached-only
+
+2. 把整個資料夾搬到目標機器
+
+把整個 research-claw-code 資料夾連同 local_ai/runtime/ 一起複製過去即可。
+
+3. 之後離線直接啟動
 
 cd ~/Desktop/research-claw-code
 bash local_ai/run.sh
@@ -37,26 +61,36 @@ Windows PowerShell：
 Set-Location ~/Desktop/research-claw-code
 powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
 
-3. 一次性問句
+4. 一次性問句
 
 bash local_ai/run.sh --output-format text prompt "幫我解釋這個 repo"
+
+或：
+
+bash local_ai/run.sh "請用中文整理這個專案的重點"
 
 Windows PowerShell：
 
 powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1 --output-format text prompt "幫我解釋這個 repo"
 
-離線模式預設會以繁體中文回覆。若想改寫回覆風格，可設定：
+或：
 
-CLAW_SYSTEM_PROMPT="請全程使用繁體中文，回答精簡一點" bash local_ai/run.sh
+powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1 "請用中文整理這個專案的重點"
 
-如果要求寫程式但沒有指定語言，預設會輸出 C 語言程式。
-離線模式也會預設用 read-only 權限啟動，所以會直接輸出答案，不會主動寫入檔案。
+離線模式預設會：
+- 以繁體中文回覆；錯誤訊息也會以繁中 UTF-8 回傳
+- 在未指定語言時預設輸出 C 語言程式
+- 用 read-only 權限啟動，所以會直接輸出答案，不會主動寫檔
+- 一般問題會逐字串流輸出；C 題會先做本地語法檢查再一次輸出，最多重試兩次
 
-4. 搬到另一台電腦
+多行輸入建議使用：
 
-把整個 research-claw-code 資料夾連同 local_ai/runtime/ 一起複製過去即可。
+/multiline
+第一行
+第二行
+/submit
 
-4.5 用完後清掉 deploy_local.sh 下載到 repo 裡的 bundle
+5. 用完後清掉 repo 內 bundle
 
 bash cleanup_local.sh
 
@@ -66,24 +100,34 @@ powershell -ExecutionPolicy Bypass -File .\cleanup_local.ps1
 
 這只會刪除 local_ai/runtime/，不會刪掉 ~/.ollama 的全域模型快取。
 
-5. 注意事項
-
-- 不需要另外安裝 ollama
-- 在 macOS 上不需要另外安裝 Python，launcher 會使用系統自帶的 /usr/bin/python3
-- 目前 bundle 是「相同作業系統 + 相同 CPU 架構」可攜
-- 例：macOS arm64 打包的 bundle，最穩是搬到另一台 macOS arm64 機器
-
 6. 常用環境變數
 
-CLAW_MODEL=llama3.2 bash local_ai/run.sh
+CLAW_MODEL=qwen2.5-coder:14b bash local_ai/run.sh
 CLAW_OLLAMA_PORT=11435 bash local_ai/run.sh
+CLAW_PROXY_PORT=8082 bash local_ai/run.sh
+CLAW_PERMISSION_MODE=read-only bash local_ai/run.sh
+CLAW_SYSTEM_PROMPT="請全程使用繁體中文，回答精簡一點" bash local_ai/run.sh
 
 Windows PowerShell：
 
-$env:CLAW_MODEL="llama3.2"; powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
+$env:CLAW_MODEL="qwen2.5-coder:14b"; powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
 $env:CLAW_OLLAMA_PORT="11435"; powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
+$env:CLAW_PROXY_PORT="8082"; powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
+$env:CLAW_PERMISSION_MODE="read-only"; powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
+$env:CLAW_SYSTEM_PROMPT="請全程使用繁體中文，回答精簡一點"; powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
 
-7. 疑難排解
+7. 注意事項
+
+- bundle 目前是「相同作業系統 + 相同 CPU 架構」可攜
+- local_ai/runtime/ 可能很大，因為模型會一起打包
+- --fast 會優先重用既有 binary 與已打包模型
+- --cached-only 不會下載模型；若本機沒有快取指定模型就直接失敗
+- bundle manifest 是 BOM-less UTF-8，Windows 打出的 bundle 搬到 macOS / Linux 讀取不會被 BOM 卡住
+- 重新啟動時若舊 proxy/ollama 還占著 port，Windows 與 macOS / Linux 都會等最多 10 秒再接手
+- deploy_local.sh 與 deploy_local.ps1 都會在結束時印出總耗時
+- Shift+Enter 是否可用會受終端機影響；Windows 上請優先用 /multiline
+
+8. 疑難排解
 
 找不到 bundle：
 bash deploy_local.sh
@@ -95,7 +139,8 @@ cat local_ai/runtime/bundle-manifest.txt
 tail -f /tmp/claw-local-ollama.log
 tail -f /tmp/claw-local-proxy.log
 
-8. 參考文件
+9. 參考文件
 
 README.md
+USAGE.md
 local_ai/README.md

@@ -67,7 +67,19 @@ function Stop-ListenerOnPort($port, $label) {
         } catch {
         }
     }
-    Start-Sleep -Seconds 1
+    for ($i = 1; $i -le 10; $i++) {
+        Start-Sleep -Seconds 1
+        try {
+            $remaining = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction Stop
+        } catch {
+            $remaining = $null
+        }
+        if (-not $remaining) {
+            Write-Ok "$label port $port cleared"
+            return
+        }
+    }
+    Write-Fail "could not free port $port for $label"
 }
 
 function Wait-HttpOk($url, $seconds) {
@@ -87,8 +99,53 @@ $projectDir = Split-Path -Parent $scriptDir
 $runtimeDir = Join-Path $scriptDir "runtime"
 $binDir = Join-Path $runtimeDir "bin"
 $bundledOllamaHome = Join-Path $runtimeDir "ollama-home"
+$manifestPath = Join-Path $runtimeDir "bundle-manifest.txt"
 
-$model = if ($env:CLAW_MODEL) { $env:CLAW_MODEL } else { "llama3.2" }
+function Get-BundledModelManifestPath($bundledOllamaHome, $model) {
+    $modelName = $model.Split(":", 2)[0]
+    $baseDir = Join-Path $bundledOllamaHome ("models/manifests/registry.ollama.ai/library/" + $modelName)
+    if ($model.Contains(":")) {
+        $modelTag = $model.Split(":", 2)[1]
+        $exactPath = Join-Path $baseDir $modelTag
+        if (Test-Path $exactPath) {
+            return $exactPath
+        }
+    }
+    $latestPath = Join-Path $baseDir "latest"
+    if (Test-Path $latestPath) {
+        return $latestPath
+    }
+    if ($model.Contains(":")) {
+        return (Join-Path $baseDir $model.Split(":", 2)[1])
+    }
+    return $latestPath
+}
+
+function Get-BundledModelRequestName($bundledOllamaHome, $model) {
+    $modelName = $model.Split(":", 2)[0]
+    $baseDir = Join-Path $bundledOllamaHome ("models/manifests/registry.ollama.ai/library/" + $modelName)
+    if ($model.Contains(":")) {
+        $modelTag = $model.Split(":", 2)[1]
+        $exactPath = Join-Path $baseDir $modelTag
+        if (Test-Path $exactPath) {
+            return $model
+        }
+    }
+    $latestPath = Join-Path $baseDir "latest"
+    if (Test-Path $latestPath) {
+        return $modelName
+    }
+    return $model
+}
+
+$defaultModel = "qwen2.5-coder:14b"
+if (Test-Path $manifestPath) {
+    $manifestModelLine = Select-String -Path $manifestPath -Pattern '^model=' -ErrorAction SilentlyContinue
+    if ($manifestModelLine) {
+        $defaultModel = $manifestModelLine.Line.Substring(6)
+    }
+}
+$model = if ($env:CLAW_MODEL) { $env:CLAW_MODEL } else { $defaultModel }
 $proxyPort = if ($env:CLAW_PROXY_PORT) { [int]$env:CLAW_PROXY_PORT } else { 8082 }
 $ollamaPort = if ($env:CLAW_OLLAMA_PORT) { [int]$env:CLAW_OLLAMA_PORT } else { 11435 }
 $ollamaUrl = if ($env:OLLAMA_URL) { $env:OLLAMA_URL } else { "http://127.0.0.1:$ollamaPort" }
@@ -152,7 +209,6 @@ try {
         Write-Warn "bundled model cache not found; falling back to system ollama cache"
     }
 
-    $manifestPath = Join-Path $runtimeDir "bundle-manifest.txt"
     if (Test-Path $manifestPath) {
         $manifest = @{}
         Get-Content $manifestPath | ForEach-Object {
@@ -167,6 +223,7 @@ try {
     }
 
     $env:OLLAMA_HOST = "127.0.0.1:$ollamaPort"
+    $ollamaRequestModel = if (Test-Path $bundledOllamaHome) { Get-BundledModelRequestName $bundledOllamaHome $model } else { $model }
 
     Write-Header "ollama"
     if (Test-PortListening $ollamaPort) {
@@ -180,6 +237,10 @@ try {
         }
         Write-Ok "bundled service ready in ${readyIn}s"
     }
+    $bundledModelManifest = Get-BundledModelManifestPath $bundledOllamaHome $model
+    if ((Test-Path $bundledOllamaHome) -and (-not (Test-Path $bundledModelManifest))) {
+        Write-Fail "model '$model' is not available in the bundled runtime"
+    }
     Write-Ok "model cached locally: $model"
 
     Write-Header "proxy"
@@ -188,6 +249,7 @@ try {
     $proxyProcess = Start-Process -FilePath $pythonPath -ArgumentList @(
         (Join-Path $scriptDir "proxy.py"),
         "--model", $model,
+        "--ollama-model", $ollamaRequestModel,
         "--port", "$proxyPort",
         "--ollama-url", $ollamaUrl,
         "--system-prompt", $systemPrompt

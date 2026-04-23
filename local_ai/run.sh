@@ -22,8 +22,58 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 RUNTIME_DIR="$SCRIPT_DIR/runtime"
 BIN_DIR="$RUNTIME_DIR/bin"
 BUNDLED_OLLAMA_HOME="$RUNTIME_DIR/ollama-home"
+MANIFEST_PATH="$RUNTIME_DIR/bundle-manifest.txt"
 
-MODEL="${CLAW_MODEL:-llama3.2}"
+bundled_model_manifest_path() {
+    local model_ref="$1"
+    local model_name="${model_ref%%:*}"
+    local model_tag="${model_ref#*:}"
+    local base_dir="${BUNDLED_OLLAMA_HOME}/models/manifests/registry.ollama.ai/library/$model_name"
+    local exact_path="${base_dir}/${model_tag}"
+    local latest_path="${base_dir}/latest"
+
+    if [[ "$model_name" != "$model_ref" && -f "$exact_path" ]]; then
+        printf "%s" "$exact_path"
+        return 0
+    fi
+    if [[ -f "$latest_path" ]]; then
+        printf "%s" "$latest_path"
+        return 0
+    fi
+    if [[ -f "$exact_path" ]]; then
+        printf "%s" "$exact_path"
+        return 0
+    fi
+    return 1
+}
+
+bundled_model_request_name() {
+    local model_ref="$1"
+    local model_name="${model_ref%%:*}"
+    local model_tag="${model_ref#*:}"
+    local base_dir="${BUNDLED_OLLAMA_HOME}/models/manifests/registry.ollama.ai/library/$model_name"
+    local exact_path="${base_dir}/${model_tag}"
+    local latest_path="${base_dir}/latest"
+
+    if [[ "$model_name" != "$model_ref" && -f "$exact_path" ]]; then
+        printf "%s" "$model_ref"
+        return 0
+    fi
+    if [[ -f "$latest_path" ]]; then
+        printf "%s" "$model_name"
+        return 0
+    fi
+    printf "%s" "$model_ref"
+}
+
+default_model="qwen2.5-coder:14b"
+if [[ -f "$MANIFEST_PATH" ]]; then
+    manifest_model="$(awk -F= '/^model=/{print $2}' "$MANIFEST_PATH" | tail -n 1)"
+    if [[ -n "$manifest_model" ]]; then
+        default_model="$manifest_model"
+    fi
+fi
+MODEL="${CLAW_MODEL:-$default_model}"
 PROXY_PORT="${CLAW_PROXY_PORT:-8082}"
 OLLAMA_PORT="${CLAW_OLLAMA_PORT:-11435}"
 OLLAMA_URL="${OLLAMA_URL:-http://127.0.0.1:${OLLAMA_PORT}}"
@@ -186,9 +236,9 @@ else
     warn "bundled model cache not found; falling back to system ollama cache"
 fi
 
-if [[ -f "$RUNTIME_DIR/bundle-manifest.txt" ]]; then
-    expected_os="$(awk -F= '/^bundle_os=/{print $2}' "$RUNTIME_DIR/bundle-manifest.txt" | tail -n 1)"
-    expected_arch="$(awk -F= '/^bundle_arch=/{print $2}' "$RUNTIME_DIR/bundle-manifest.txt" | tail -n 1)"
+if [[ -f "$MANIFEST_PATH" ]]; then
+    expected_os="$(awk -F= '/^bundle_os=/{print $2}' "$MANIFEST_PATH" | tail -n 1)"
+    expected_arch="$(awk -F= '/^bundle_arch=/{print $2}' "$MANIFEST_PATH" | tail -n 1)"
     if [[ -n "$expected_os" && "$bundle_os" != "$expected_os" ]]; then
         fail "bundle targets ${expected_os}, but this machine is ${bundle_os}"
     fi
@@ -199,7 +249,14 @@ if [[ -f "$RUNTIME_DIR/bundle-manifest.txt" ]]; then
 fi
 
 export OLLAMA_HOST="127.0.0.1:${OLLAMA_PORT}"
-BUNDLED_MODEL_MANIFEST="${BUNDLED_OLLAMA_HOME}/models/manifests/registry.ollama.ai/library/${MODEL}/latest"
+BUNDLED_MODEL_MANIFEST=""
+if [[ "$USE_BUNDLED_OLLAMA" -eq 1 ]]; then
+    BUNDLED_MODEL_MANIFEST="$(bundled_model_manifest_path "$MODEL" || true)"
+fi
+OLLAMA_REQUEST_MODEL="$MODEL"
+if [[ "$USE_BUNDLED_OLLAMA" -eq 1 ]]; then
+    OLLAMA_REQUEST_MODEL="$(bundled_model_request_name "$MODEL")"
+fi
 
 header "ollama"
 
@@ -253,6 +310,7 @@ stop_listener_on_port "$PROXY_PORT" "proxy"
 
 "$PYTHON_BIN" "$SCRIPT_DIR/proxy.py" \
     --model "$MODEL" \
+    --ollama-model "$OLLAMA_REQUEST_MODEL" \
     --port "$PROXY_PORT" \
     --ollama-url "$OLLAMA_URL" \
     --system-prompt "$SYSTEM_PROMPT" \
