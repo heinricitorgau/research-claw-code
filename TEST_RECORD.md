@@ -1,9 +1,9 @@
 # TEST_RECORD — 實驗性加固測試紀錄
 
-**日期：** 2026-04-13（v1/v2）、2026-04-15（v3）、2026-04-24（v4）
+**日期：** 2026-04-13（v1/v2）、2026-04-15（v3）、2026-04-24（v4/v5）
 **分支：** `test/experimental-hardening`
 **測試執行器：** Python `unittest`（標準庫，無需外部依賴）
-**總測試數量（本輪結束後）：** 196（原有 22 + v1 新增 64 + v2 新增 43 + v3 新增 45 + v4 新增 22）— 全數通過 ✅
+**總測試數量（本輪結束後）：** 208（原有 22 + v1 新增 64 + v2 新增 43 + v3 新增 45 + v4 新增 22 + v5 新增 12）— 全數通過 ✅
 
 ---
 
@@ -516,3 +516,101 @@ python3 tests/test_experimental_hardening_v4_proxy.py
 5. **bundle manifest BOM-less 往返：** PowerShell 端的寫入已改成 `UTF8Encoding($false)`；建議加一組「Windows 寫、Linux 讀」的跨平台 fixture 測試。
 
 這些項目建議排進 v5 計畫，暫不阻擋當前 v4 合入。
+
+---
+
+## 第五輪（v5）—— v4 建議補強點全數落實
+
+**日期：** 2026-04-24
+**新增測試數：** 12（累積 208）
+**測試檔：** `tests/test_experimental_hardening_v5_proxy.py`
+**執行指令：** `python3 tests/test_experimental_hardening_v5_proxy.py`
+**執行結果：** `Ran 12 tests in 3.167s — OK` ✅
+**目標：** 把 v4 結尾列出的 5 個 follow-up 項目逐一落實成自動化測試，並補上一項 proxy 的 SSE 復原強化。
+
+### 背景
+
+v4 結束時在 `TEST_RECORD.md` 留下 5 個建議補強點。v5 把每一項都寫成回歸測試，並在發現真實 bug 的地方直接修 proxy。重點發現是：當使用者送出 `stream=True` 請求但 Ollama 連線中途掉線時，proxy 原本已經送出 `HTTP 200 + text/event-stream` header，再從外層 `except URLError` 改丟 502 會形成「半份 SSE + 半份 JSON」的混亂回應。v5 把送 header 的時機延後到上游 stream 真的打開之後，並補一份 `_mid_stream_error_trailer` 專門處理「header 已送、上游才掛掉」的情境。
+
+### 假設表格（Hypothesis Table）
+
+| # | 假設 | 測試情境 | 預期 | 實際 | 狀態 |
+|---|------|---------|------|------|------|
+| H-v5-01 | `_mid_stream_error_trailer` 內含 `stop_reason=error` 與中文 UTF-8 錯誤文字 | 直接呼叫 helper 取 bytes | 包含 `message_delta`、`stop_reason`=error、中文字元原樣 | 全符合 | ✅ PASS |
+| H-v5-02 | trailer 最後一個 event 必為 `message_stop` | 同上 | 末尾 event name = `message_stop` | 正確 | ✅ PASS |
+| H-v5-03 | `stream=True` 且 upstream 連不上 → 502 + zh-TW JSON，不漏出半份 SSE | 起 proxy 指向死 port | HTTPError 502 + 「無法連線到 Ollama」 | 正確 | ✅ PASS |
+| H-v5-04 | 非串流同樣回 502（回歸保護） | 相同 proxy，stream=False | HTTPError 502 + zh-TW | 正確 | ✅ PASS |
+| H-v5-05 | 假 Ollama 每次都回 C++，proxy 最多打 `1 + MAX_C_REPAIR_ATTEMPTS` 次 | 單次 C 題請求 | `count == 3`（初次 + 2 重試） | `== 3` | ✅ PASS |
+| H-v5-06 | 連續兩次 C 題請求的重試計數器互相獨立 | 呼叫兩次再看 delta | 第二次 delta 也是 3 | delta = 3 | ✅ PASS |
+| H-v5-07 | 中文 JSON 錯誤 body 的 Content-Length 以位元組計而非字元 | 2000 中文字符測試 | `len(body) >= 6000` | `>= 6000` | ✅ PASS |
+| H-v5-08 | ≈510 KB 的中文 prompt 可完整往返 proxy → Ollama → 回覆 | 170 000 中文字 × 3 bytes | Echo handler 回報 >= 170 000 字元 | 一致 | ✅ PASS |
+| H-v5-09 | CLI `--system-prompt SENTINEL` 注入的 sentinel 會出現在上游 `system` 訊息 | 子行程啟動 proxy + RecordingHandler | system message 含 SENTINEL | 含 | ✅ PASS |
+| H-v5-10 | sentinel 不會被誤當作 user message（泄漏保護） | 同上 payload | user messages 無 sentinel | 無 | ✅ PASS |
+| H-v5-11 | BOM-less UTF-8 manifest 不以 `\xEF\xBB\xBF` 開頭 | 寫入 4 行含中文、讀 bytes | 無 BOM | 無 | ✅ PASS |
+| H-v5-12 | 反面對照：若寫 BOM 則第一行開頭含 `U+FEFF`（確保測試本身有鑑別力） | 主動寫 BOM | 第一行以 BOM 開頭 | 正確 | ✅ PASS |
+
+### 測試類別分佈
+
+| 測試類別 | 測試數 | 覆蓋範圍 |
+|---------|-------|---------|
+| `TestMidStreamErrorTrailer` | 2 | SSE trailer 結構與 UTF-8 中文保真 |
+| `UnreachableUpstreamProxy` | 2 | upstream 死掉時 stream/non-stream 都回 502 |
+| `TestCRepairMaxRetries` | 2 | C 修復呼叫次數上限與跨請求獨立性 |
+| `TestSendJsonErrorByteLength` | 1 | 多位元組 UTF-8 Content-Length |
+| `TestLargeBodyRoundTrip` | 1 | ≈510 KB prompt 完整往返 |
+| `TestSystemPromptPropagation` | 2 | `--system-prompt` CLI → 上游 system message |
+| `TestBundleManifestBomless` | 2 | bundle manifest BOM-less 與對照組 |
+
+### 本輪所做的強化（Strengthening）
+
+| # | 位置 | 問題 | 修復 |
+|---|------|------|------|
+| S-v5-1 | `local_ai/proxy.py::_stream_response` | 舊版在 `send_response(200)` 之後才呼叫 `_open_ollama_stream()`；若上游打不通，`_handle_messages` 的 outer `except URLError` 會再嘗試送 502 JSON，導致「半份 SSE header + 半份 JSON body」的協定衝突。 | 把 `send_response(200)` 延後到 `_open_ollama_stream()` 成功之後；若上游打不開，exception 正常 bubble 到 `_handle_messages` 只送 JSON 錯誤。c-repair 路徑同樣改為「先取完整文字再 commit SSE header」。 |
+| S-v5-2 | `local_ai/proxy.py::_stream_response` | 串流中途 upstream 掉線時，只會因為 `BrokenPipeError` 被靜默吞掉，客戶端看到 SSE 訊號沒有終止標記，UI 會卡在「回答中」。 | 新增 `_mid_stream_error_trailer()` helper；`URLError` / `HTTPError` / `http.client.IncompleteRead` / `ConnectionError` / `OSError` 被中途拋出時，送一份「errored `message_delta` + `message_stop`」trailer，讓客戶端乾淨收尾。 |
+| S-v5-3 | `local_ai/proxy.py` import 區 | 之前缺 `http.client` 這一層 exception 類別。 | 在檔案頂端加上 `import http.client`。 |
+
+### 端到端骨架
+
+v5 測試混用兩種執行方式：
+
+1. **In-process HTTPServer + `proxy.ProxyHandler`** —— 快速、可直接讀 handler 類別屬性，用來測 `UnreachableUpstreamProxy`、`TestCRepairMaxRetries`、`TestLargeBodyRoundTrip`。這些測試需要改寫 `ProxyHandler.ollama_url` 等屬性，in-process 最直接。
+2. **子行程 `proxy.py --system-prompt ...`** —— 走真實 CLI 旗標路徑。`TestSystemPromptPropagation` 用這條驗證 `--system-prompt` CLI 旗標真的會把字串塞進上游 `system` message；用 `RecordingHandler.last_payload` 捕捉最後一次收到的 payload 做斷言。
+
+兩種測試都用 `_pick_free_port()` 選空閒 port，避免和機器上其他服務衝突。子行程用 `_wait_for_health()` 輪詢 `/health` 直到 200 OK 才進入主要 assertions。
+
+### 如何重跑 v5
+
+```bash
+cd ~/Desktop/research-claw-code
+python3 tests/test_experimental_hardening_v5_proxy.py
+```
+
+合併重跑 v4 + v5：
+
+```bash
+python3 tests/test_experimental_hardening_v4_proxy.py && \
+python3 tests/test_experimental_hardening_v5_proxy.py
+```
+
+預期：`Ran 22 tests in ~0.6s — OK` + `Ran 12 tests in ~3.2s — OK`。
+
+### v4 五項建議的落實對照
+
+| v4 遺留項目 | 對應 v5 測試 | 狀態 |
+|------------|-------------|------|
+| 1. SSE 斷線恢復 | H-v5-01/02 `_mid_stream_error_trailer`、H-v5-03/04 `UnreachableUpstreamProxy` | ✅ 落實 + 已強化 `_stream_response` |
+| 2. C 修復無限迴圈保護 | H-v5-05/06 `TestCRepairMaxRetries` | ✅ 落實 |
+| 3. 超大 prompt Content-Length | H-v5-07 `TestSendJsonErrorByteLength`、H-v5-08 `TestLargeBodyRoundTrip` | ✅ 落實 |
+| 4. `CLAW_SYSTEM_PROMPT` 覆寫 | H-v5-09/10 `TestSystemPromptPropagation` | ✅ 落實（走 CLI 子行程路徑） |
+| 5. bundle manifest BOM-less | H-v5-11/12 `TestBundleManifestBomless` | ✅ 落實（含反面對照組） |
+
+### 下一輪（v6）可考慮的題目
+
+v5 收尾時觀察到、但尚未立刻處理的事項：
+
+1. **chunked transfer-encoding 行為：** 目前 `_stream_response` 靠 `self.wfile` 直接寫 bytes + `Cache-Control: no-cache`，並未明確設定 `Transfer-Encoding`；部分反向代理（nginx 預設）可能會把沒有 `Content-Length` 的 response 整份緩衝後才送出，導致 SSE 變批次輸出。建議補一個 `X-Accel-Buffering: no` header 並加測試。
+2. **`_repair_c_response` 的 timeout 組合：** 每次 `_request_ollama_completion` 都是 120 秒 timeout；若模型連續三次都慢，使用者可能等到 6 分鐘才收到「還是不對」的回覆。可加一個「總 wallclock 上限」機制。
+3. **`text_to_anthropic_sse` 的單字斷詞：** 目前用 `text.split()` 估 output_tokens，對純中文會永遠回 1；若需要更準確的 token 計數可接上 `tiktoken` 或改用 ollama 回報的 eval_count。
+4. **`FUNCTION_DEF_PATTERN` 的 regex 覆蓋率：** 目前沒有定義 `int *` 指標回傳型別的函式，也沒有 `const` 修飾；在複雜 C 題可能誤報 unresolved call。建議補幾筆 edge case。
+
+這些不是 bug，只是未來想要更紮實時的 follow-up。

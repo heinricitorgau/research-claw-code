@@ -14,6 +14,7 @@ claw 以 Anthropic 格式呼叫 → 本代理轉換 → Ollama 本地模型回�
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import re
@@ -683,6 +684,31 @@ def stream_openai_to_anthropic(ollama_response, model: str):
     yield sse_line("message_stop", {"type": "message_stop"})
 
 
+def _mid_stream_error_trailer(error_text: str = "上游連線中斷") -> bytes:
+    """串流開始後如果上游中斷，用這段 SSE 事件把客戶端收尾到乾淨狀態。
+
+    客戶端不需要這個 trailer 就能解析完畢，但少了它會出現 stop_reason 永遠為 None
+    的鬼魂 message；補上 message_delta + message_stop 可讓客戶端穩定重設狀態。
+    """
+    delta = {
+        "type": "message_delta",
+        "delta": {"stop_reason": "error", "stop_sequence": None},
+        "usage": {"output_tokens": 0},
+    }
+    error_block = {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {"type": "text_delta", "text": f"\n[proxy] {error_text}"},
+    }
+    pieces = [
+        f"event: content_block_delta\ndata: {json.dumps(error_block, ensure_ascii=False)}\n\n",
+        "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+        f"event: message_delta\ndata: {json.dumps(delta, ensure_ascii=False)}\n\n",
+        "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+    ]
+    return "".join(pieces).encode("utf-8")
+
+
 def text_to_anthropic_sse(text: str, model: str):
     msg_id = "msg_" + uuid.uuid4().hex[:24]
 
@@ -818,6 +844,21 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body_bytes)
 
+    def _send_sse_headers(self) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+
+    def _emit_prerendered_text_sse(self, content_text: str, model: str) -> None:
+        """Headers 已送出後，把整段文字轉成 Anthropic SSE 並寫出。"""
+        try:
+            for chunk in text_to_anthropic_sse(content_text, model):
+                self.wfile.write(chunk)
+                self.wfile.flush()
+        except BrokenPipeError:
+            sys.stderr.write("[proxy] client disconnected during stream\n")
+
     def _stream_response(
         self,
         model: str,
@@ -825,50 +866,67 @@ class ProxyHandler(BaseHTTPRequestHandler):
         needs_c_repair: bool,
         user_text: str,
     ) -> None:
-        self.send_response(200)
-        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-        self.send_header("Cache-Control", "no-cache")
-        self.end_headers()
-        try:
-            if needs_c_repair:
-                # C 題會走本地檢查 + 重試路徑，需要完整文字才能檢驗，
-                # 因此這條路徑只能先取完整回覆再模擬 SSE。
-                oai_data = _request_ollama_completion(oai_payload, self.ollama_url)
-                oai_data = _repair_c_response(
-                    user_text, oai_payload, oai_data, self.ollama_url
-                )
-                content_text = (
-                    oai_data.get("choices", [{}])[0]
-                    .get("message", {})
-                    .get("content", "")
-                )
-                for chunk in text_to_anthropic_sse(content_text, model):
-                    self.wfile.write(chunk)
-                    self.wfile.flush()
-                return
+        if needs_c_repair:
+            # C 題會走本地檢查 + 重試路徑，需要完整文字才能檢驗。
+            # 這條路徑的上游錯誤會直接 bubble 到 _handle_messages 的錯誤包裝器，
+            # 因此 header 還沒送之前出錯，仍然可以送 JSON 錯誤。
+            oai_data = _request_ollama_completion(oai_payload, self.ollama_url)
+            oai_data = _repair_c_response(
+                user_text, oai_payload, oai_data, self.ollama_url
+            )
+            content_text = (
+                oai_data.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+            )
+            self._send_sse_headers()
+            self._emit_prerendered_text_sse(content_text, model)
+            return
 
-            # 一般路徑：直接用 Ollama 的 SSE 串流轉成 Anthropic SSE。
-            try:
-                with _open_ollama_stream(oai_payload, self.ollama_url) as upstream:
-                    for chunk in stream_openai_to_anthropic(upstream, model):
-                        self.wfile.write(chunk)
-                        self.wfile.flush()
-            except HTTPError as exc:
-                if exc.code != 404:
-                    raise
-                # 舊版 Ollama 沒有 /v1/chat/completions，退回非串流再模擬 SSE。
-                oai_data = _request_ollama_completion(oai_payload, self.ollama_url)
-                content_text = (
-                    oai_data.get("choices", [{}])
-                    [0]
-                    .get("message", {})
-                    .get("content", "")
-                )
-                for chunk in text_to_anthropic_sse(content_text, model):
+        # 一般路徑：先嘗試打開上游串流，開啟失敗就 bubble 上去；
+        # 只有真的拿到上游 stream 才送出 200 header，避免「送完 200 才發現
+        # 上游掛掉，outer handler 只好再送一份 502」的協定衝突。
+        try:
+            upstream = _open_ollama_stream(oai_payload, self.ollama_url)
+        except HTTPError as exc:
+            if exc.code != 404:
+                raise
+            # 舊版 Ollama 沒有 /v1/chat/completions，退回非串流再模擬 SSE。
+            oai_data = _request_ollama_completion(oai_payload, self.ollama_url)
+            content_text = (
+                oai_data.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+            )
+            self._send_sse_headers()
+            self._emit_prerendered_text_sse(content_text, model)
+            return
+
+        # Upstream 就緒，承諾進入串流模式。
+        self._send_sse_headers()
+        try:
+            with upstream:
+                for chunk in stream_openai_to_anthropic(upstream, model):
                     self.wfile.write(chunk)
                     self.wfile.flush()
         except BrokenPipeError:
             sys.stderr.write("[proxy] client disconnected during stream\n")
+        except (
+            URLError,
+            HTTPError,
+            http.client.IncompleteRead,
+            http.client.HTTPException,
+            ConnectionError,
+            OSError,
+        ) as exc:
+            # Header 已送，再送一份 502 只會打亂 SSE。用 trailer 告訴客戶端
+            # 收工，並把錯誤寫到 stderr 給離線 log 追查。
+            sys.stderr.write(f"[proxy] upstream interrupted mid-stream: {exc}\n")
+            try:
+                self.wfile.write(_mid_stream_error_trailer("上游連線中斷"))
+                self.wfile.flush()
+            except Exception:
+                pass
 
 
 # ── 主程式 ────────────────────────────────────────────────────────────────────
