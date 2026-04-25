@@ -32,6 +32,40 @@ function Ensure-Directory($path) {
     }
 }
 
+function Bundle-PythonDirectory($sourceDir, $runtimeDir) {
+    if (-not (Test-Path $sourceDir)) {
+        Write-Fail "portable Python directory not found: $sourceDir"
+    }
+    $sourcePython = Join-Path $sourceDir "python.exe"
+    if (-not (Test-Path $sourcePython)) {
+        Write-Fail "portable Python directory must contain python.exe: $sourceDir"
+    }
+
+    $targetDir = Join-Path $runtimeDir "python"
+    if (Test-Path $targetDir) {
+        Remove-Item -Path $targetDir -Recurse -Force
+    }
+    Ensure-Directory $targetDir
+    Copy-Item -Path (Join-Path $sourceDir "*") -Destination $targetDir -Recurse -Force
+}
+
+function Bundle-PythonZip($zipPath, $runtimeDir) {
+    if (-not (Test-Path $zipPath)) {
+        Write-Fail "portable Python zip not found: $zipPath"
+    }
+    $targetDir = Join-Path $runtimeDir "python"
+    if (Test-Path $targetDir) {
+        Remove-Item -Path $targetDir -Recurse -Force
+    }
+    Ensure-Directory $targetDir
+    Expand-Archive -Path $zipPath -DestinationPath $targetDir -Force
+
+    $targetPython = Join-Path $targetDir "python.exe"
+    if (-not (Test-Path $targetPython)) {
+        Write-Fail "portable Python zip must extract python.exe at its root: $zipPath"
+    }
+}
+
 function Resolve-ModelManifestPath($model, $manifestRoot) {
     if ($model.Contains(":")) {
         $parts = $model.Split(":", 2)
@@ -99,16 +133,38 @@ $binDir = Join-Path $runtimeDir "bin"
 $bundledPythonPath = Join-Path $runtimeDir "python/python.exe"
 $fastMode = $false
 $cachedOnly = $false
+$pythonZip = if ($env:CLAW_PORTABLE_PYTHON_ZIP) { $env:CLAW_PORTABLE_PYTHON_ZIP } else { $null }
+$pythonDir = if ($env:CLAW_PORTABLE_PYTHON_DIR) { $env:CLAW_PORTABLE_PYTHON_DIR } else { $null }
 $model = if ($env:CLAW_MODEL) { $env:CLAW_MODEL } else { "qwen2.5-coder:14b" }
-foreach ($arg in $args) {
+$argIndex = 0
+while ($argIndex -lt $args.Count) {
+    $arg = $args[$argIndex]
     switch ($arg) {
-        "--fast" { $fastMode = $true; continue }
-        "--cached-only" { $cachedOnly = $true; continue }
+        "--fast" { $fastMode = $true; break }
+        "--cached-only" { $cachedOnly = $true; break }
+        "--python-zip" {
+            $argIndex++
+            if ($argIndex -ge $args.Count) {
+                Write-Fail "--python-zip requires a path"
+            }
+            $pythonZip = $args[$argIndex]
+            break
+        }
+        "--python-dir" {
+            $argIndex++
+            if ($argIndex -ge $args.Count) {
+                Write-Fail "--python-dir requires a path"
+            }
+            $pythonDir = $args[$argIndex]
+            break
+        }
         "--help" {
-            Write-Host "usage: powershell -ExecutionPolicy Bypass -File .\local_ai\prepare_bundle.ps1 [model] [--fast] [--cached-only]"
+            Write-Host "usage: powershell -ExecutionPolicy Bypass -File .\local_ai\prepare_bundle.ps1 [model] [--fast] [--cached-only] [--python-zip PATH] [--python-dir PATH]"
             Write-Host ""
             Write-Host "  --fast         優先重用既有 binary 與已打包模型，減少重建與重拷貝"
             Write-Host "  --cached-only  不下載模型；若本機快取缺少指定模型就直接失敗"
+            Write-Host "  --python-zip   打包 Windows embeddable / portable Python zip 到 local_ai/runtime/python"
+            Write-Host "  --python-dir   打包已解壓且含 python.exe 的 portable Python 目錄"
             exit 0
         }
         default {
@@ -118,6 +174,10 @@ foreach ($arg in $args) {
             $model = $arg
         }
     }
+    $argIndex++
+}
+if ($pythonZip -and $pythonDir) {
+    Write-Fail "use only one of --python-zip or --python-dir"
 }
 $sourceOllamaHome = if ($env:OLLAMA_HOME_OVERRIDE) { $env:OLLAMA_HOME_OVERRIDE } else { Join-Path $HOME ".ollama" }
 $manifestRoot = Join-Path $sourceOllamaHome "models/manifests/registry.ollama.ai/library"
@@ -181,6 +241,19 @@ Write-Header "bundle ollama"
 Copy-Item -Path $ollamaPath -Destination (Join-Path $binDir "ollama.exe") -Force
 Write-Ok "bundled ollama executable"
 
+Write-Header "bundle python"
+if ($pythonZip) {
+    Bundle-PythonZip $pythonZip $runtimeDir
+    Write-Ok "bundled portable Python from zip"
+} elseif ($pythonDir) {
+    Bundle-PythonDirectory $pythonDir $runtimeDir
+    Write-Ok "bundled portable Python from directory"
+} elseif (Test-Path $bundledPythonPath) {
+    Write-Ok "reusing bundled portable Python"
+} else {
+    Write-Info "portable Python not bundled; run.ps1 will need system Python unless CLAW_STRICT_OFFLINE=1 is disabled"
+}
+
 if (-not (Test-Path $sourceOllamaHome)) {
     Write-Fail "cannot find Ollama home at $sourceOllamaHome"
 }
@@ -241,3 +314,6 @@ Write-Host "  powershell -ExecutionPolicy Bypass -File local_ai/prepare_bundle.p
 Write-Host ""
 Write-Host "若只允許使用本機已快取的模型："
 Write-Host "  powershell -ExecutionPolicy Bypass -File local_ai/prepare_bundle.ps1 --cached-only"
+Write-Host ""
+Write-Host "若要支援 Windows 空機 Level 1 air-gap，請加入 portable Python："
+Write-Host "  powershell -ExecutionPolicy Bypass -File local_ai/prepare_bundle.ps1 --python-zip C:\path\python-embed-amd64.zip"

@@ -33,6 +33,14 @@ Windows PowerShell:
 Set-Location ~/Desktop/research-claw-code
 powershell -ExecutionPolicy Bypass -File .\local_ai\deploy_local.ps1
 
+Windows Level 1 air-gap 若目標機沒有 Python，請在準備機加入 portable Python：
+
+powershell -ExecutionPolicy Bypass -File .\local_ai\prepare_bundle.ps1 --python-zip C:\path\python-embed-amd64.zip
+
+或：
+
+powershell -ExecutionPolicy Bypass -File .\local_ai\prepare_bundle.ps1 --python-dir C:\path\python-portable
+
 如果下載時間很短，可以改用快速模式：
 
 macOS / Linux:
@@ -63,6 +71,11 @@ bash local_ai/run.sh
 Windows PowerShell:
 
 Set-Location ~/Desktop/research-claw-code
+powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
+
+Level 1 strict 驗收：
+
+$env:CLAW_STRICT_OFFLINE="1"
 powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
 
 四、直接問單一問題

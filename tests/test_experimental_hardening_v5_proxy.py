@@ -642,6 +642,17 @@ class TestWindowsAirgapLauncherContract(unittest.TestCase):
         self.assertIn("python_binary=", text)
         self.assertIn('Join-Path $runtimeDir "python/python.exe"', text)
 
+    def test_prepare_bundle_accepts_portable_python_sources(self):
+        text = self.PREPARE_PS1.read_text(encoding="utf-8")
+        self.assertIn("--python-zip", text)
+        self.assertIn("--python-dir", text)
+        self.assertIn("CLAW_PORTABLE_PYTHON_ZIP", text)
+        self.assertIn("CLAW_PORTABLE_PYTHON_DIR", text)
+        self.assertIn("function Bundle-PythonZip", text)
+        self.assertIn("function Bundle-PythonDirectory", text)
+        self.assertIn("Expand-Archive", text)
+        self.assertIn("portable Python zip must extract python.exe at its root", text)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

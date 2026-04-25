@@ -59,6 +59,15 @@ Windows PowerShell：
 powershell -ExecutionPolicy Bypass -File .\local_ai\prepare_bundle.ps1 qwen2.5-coder:14b
 ```
 
+Windows Level 1 air-gap 若目標機沒有 Python，請在準備機加入 portable Python：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\local_ai\prepare_bundle.ps1 --python-zip C:\path\python-embed-amd64.zip
+powershell -ExecutionPolicy Bypass -File .\local_ai\prepare_bundle.ps1 --python-dir C:\path\python-portable
+```
+
+`--python-zip` 會解壓 Windows embeddable / portable Python zip 到 `local_ai/runtime/python/`，zip 根目錄必須包含 `python.exe`。`--python-dir` 會複製一個已解壓且含 `python.exe` 的 portable Python 目錄。
+
 ### 之後離線啟動
 
 ```bash
@@ -70,6 +79,13 @@ Windows PowerShell：
 
 ```powershell
 Set-Location ~/Desktop/research-claw-code
+powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
+```
+
+若要驗收 Level 1 strict 模式：
+
+```powershell
+$env:CLAW_STRICT_OFFLINE="1"
 powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
 ```
 

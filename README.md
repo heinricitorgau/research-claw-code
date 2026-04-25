@@ -67,6 +67,15 @@ powershell -ExecutionPolicy Bypass -File .\local_ai\prepare_bundle.ps1 --fast
 powershell -ExecutionPolicy Bypass -File .\local_ai\prepare_bundle.ps1 --cached-only
 ```
 
+Windows Level 1 air-gap 若目標機沒有 Python，請在準備機把 portable Python 一起打包：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\local_ai\prepare_bundle.ps1 --python-zip C:\path\python-embed-amd64.zip
+powershell -ExecutionPolicy Bypass -File .\local_ai\prepare_bundle.ps1 --python-dir C:\path\python-portable
+```
+
+`--python-zip` 適合 Windows embeddable / portable Python zip，解壓後必須在根目錄有 `python.exe`。`--python-dir` 適合已解壓、且目錄內已有 `python.exe` 的 portable Python。
+
 ### 2. 複製到目標機器
 
 把整個 `research-claw-code/` 資料夾連同 `local_ai/runtime/` 一起複製到目標機器。
@@ -74,6 +83,13 @@ powershell -ExecutionPolicy Bypass -File .\local_ai\prepare_bundle.ps1 --cached-
 目前 bundle 以「相同作業系統 + 相同 CPU 架構」可攜為主，例如 macOS arm64 打出的 bundle 最適合搬到另一台 macOS arm64。
 
 Windows Level 1 air-gap 測試時，建議在有網路的 Windows x64 準備機打包，再用 USB/外接硬碟/光碟/映像檔搬到無網路的 Windows x64 目標機。目標機啟動前不要再執行 `prepare_bundle.ps1`，只執行 `run.ps1`。
+
+若要驗收目標機完全不依賴系統安裝，請啟動前設定：
+
+```powershell
+$env:CLAW_STRICT_OFFLINE="1"
+powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
+```
 
 ### 3. 在離線環境啟動
 
