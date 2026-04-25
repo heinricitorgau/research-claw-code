@@ -96,6 +96,7 @@ $projectDir = Split-Path -Parent $scriptDir
 $rustDir = Join-Path $projectDir "rust"
 $runtimeDir = Join-Path $scriptDir "runtime"
 $binDir = Join-Path $runtimeDir "bin"
+$bundledPythonPath = Join-Path $runtimeDir "python/python.exe"
 $fastMode = $false
 $cachedOnly = $false
 $model = if ($env:CLAW_MODEL) { $env:CLAW_MODEL } else { "qwen2.5-coder:14b" }
@@ -208,6 +209,8 @@ $manifestLines = @(
     "claw_binary=$(Join-Path $binDir 'claw.exe')"
     "ollama_binary=$(Join-Path $binDir 'ollama.exe')"
     "ollama_home=$(Join-Path $runtimeDir 'ollama-home')"
+    "python_runtime=$(if (Test-Path $bundledPythonPath) { 'bundled' } else { 'external' })"
+    "python_binary=$(if (Test-Path $bundledPythonPath) { $bundledPythonPath } else { '' })"
     "launch_command=powershell -ExecutionPolicy Bypass -File local_ai/run.ps1"
 )
 $manifestFilePath = Join-Path $runtimeDir "bundle-manifest.txt"

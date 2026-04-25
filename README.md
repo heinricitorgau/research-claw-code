@@ -18,7 +18,9 @@
 
 也就是說，這不是「完全沒有外部媒介的空機自生成 AI」，而是「先製作完整可攜 bundle，再部署到全程無網路的 Windows 目標機」。
 
-目前 Windows bundle 已打包 `claw.exe`、`ollama.exe` 與模型快取；但 `local_ai/run.ps1` 仍需要目標機可執行 `python`、`python3` 或 `py` 來啟動 `local_ai/proxy.py`。若目標 Windows 空機沒有 Python，還需要把 portable Python 打包進 `local_ai/runtime/`，或之後把 proxy 做成獨立 `proxy.exe`，才算完整通過 Level 1。
+目前 Windows bundle 已打包 `claw.exe`、`ollama.exe` 與模型快取；`local_ai/run.ps1` 會優先尋找 `local_ai/runtime/python/python.exe`，再 fallback 到系統 `python`、`python3` 或 `py` 來啟動 `local_ai/proxy.py`。若目標 Windows 空機沒有 Python，還需要把 portable Python 打包進 `local_ai/runtime/`，或之後把 proxy 做成獨立 `proxy.exe`，才算完整通過 Level 1。
+
+Windows launcher 已支援 `CLAW_STRICT_OFFLINE=1`。開啟後只允許使用 `local_ai/runtime/` 內的 bundled `claw.exe`、`ollama.exe`、模型快取、manifest 與 Python；缺任一項會直接失敗，不會 fallback 到系統安裝。
 
 ## 快速開始：離線 bundle
 
@@ -140,6 +142,7 @@ $env:CLAW_MODEL="qwen2.5-coder:14b"; powershell -ExecutionPolicy Bypass -File .\
 $env:CLAW_OLLAMA_PORT="11435"; powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
 $env:CLAW_PROXY_PORT="8082"; powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
 $env:CLAW_PERMISSION_MODE="read-only"; powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
+$env:CLAW_STRICT_OFFLINE="1"; powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
 $env:CLAW_SYSTEM_PROMPT="請全程使用繁體中文，回答精簡一點"; powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
 ```
 
@@ -199,6 +202,6 @@ cargo run -p rusty-claude-cli -- prompt "explain this codebase"
 - bundle manifest 在 Windows 上也是以 BOM-less UTF-8 寫入，搬到 macOS / Linux 的 `run.sh` 讀取不會卡在 BOM。
 - 重新啟動時若舊 proxy / Ollama 還占著 port，Windows 與 macOS / Linux 都會等最多 10 秒嘗試釋放 port 再接手。
 - macOS launcher 會優先使用系統自帶的 `/usr/bin/python3`。
-- Windows launcher 會優先尋找 `python`、`python3` 或 `py`；若要支援出廠空機 Level 1 air-gap，仍需打包 portable Python 或改用獨立 `proxy.exe`。
+- Windows launcher 會優先尋找 `local_ai/runtime/python/python.exe`，再 fallback 到 `python`、`python3` 或 `py`；若設定 `CLAW_STRICT_OFFLINE=1`，則不允許 fallback。
 - `local_ai/deploy_local.sh` 與 `local_ai/deploy_local.ps1` 都會在結束時印出總耗時。
 - 若主要用途是解 C 題，建議優先用 `qwen2.5-coder:14b`；機器較吃緊時再考慮 `qwen2.5-coder:7b`。

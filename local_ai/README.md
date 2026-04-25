@@ -17,11 +17,13 @@
 - 目標機只執行 `local_ai/run.ps1`，不執行下載、安裝、編譯或 `ollama pull`。
 - bundle 應在另一台有網路的 Windows 準備機完成，且準備機與目標機需盡量保持相同 OS 與 CPU 架構。
 
-目前 Windows bundle 會帶入 `claw.exe`、`ollama.exe` 與模型快取。仍需注意：`run.ps1` 會用 `python`、`python3` 或 `py` 執行 `proxy.py`。若目標 Windows 空機沒有 Python，完整 Level 1 部署還需要額外帶入 portable Python，或未來改成 bundled `proxy.exe`。
+目前 Windows bundle 會帶入 `claw.exe`、`ollama.exe` 與模型快取。`run.ps1` 會優先尋找 `local_ai/runtime/python/python.exe`，再 fallback 到系統 `python`、`python3` 或 `py` 執行 `proxy.py`。若目標 Windows 空機沒有 Python，完整 Level 1 部署還需要額外帶入 portable Python，或未來改成 bundled `proxy.exe`。
+
+Windows launcher 已支援 `CLAW_STRICT_OFFLINE=1`。開啟後只接受 `local_ai/runtime/` 內的 bundled `claw.exe`、`ollama.exe`、模型快取、manifest 與 Python；缺少任何一項都會直接失敗，不會 fallback 到系統安裝。
 
 目前離線流程會用到的入口腳本也都集中在 `local_ai/` 目錄下。
 
-現在的 launcher 不依賴系統安裝的 `ollama`。它會直接使用 `local_ai/runtime/` 內打包好的執行檔與模型，並透過系統自帶的 Python 3 跑一層很薄的本地 proxy。離線模式下，proxy 會預設附加繁體中文 system prompt，因此一般提問會直接用中文回覆；如果要它寫程式而你沒有指定語言，預設會輸出 `C` 語言。啟動時也會預設使用 `read-only` 權限，所以它會直接輸出答案，而不是主動改檔或寫檔。
+現在的 launcher 不依賴系統安裝的 `ollama`。它會直接使用 `local_ai/runtime/` 內打包好的執行檔與模型，並優先透過 bundled Python 跑一層很薄的本地 proxy；若沒有 bundled Python，普通模式才會 fallback 到系統 Python。離線模式下，proxy 會預設附加繁體中文 system prompt，因此一般提問會直接用中文回覆；如果要它寫程式而你沒有指定語言，預設會輸出 `C` 語言。啟動時也會預設使用 `read-only` 權限，所以它會直接輸出答案，而不是主動改檔或寫檔。
 
 ## 你要用的兩個指令
 
@@ -106,6 +108,7 @@ local_ai/runtime/
 ├── bin/
 │   ├── claw
 │   └── ollama
+├── python/        # Windows Level 1 air-gap 建議放 portable Python
 ├── ollama-home/
 └── bundle-manifest.txt
 ```
@@ -141,7 +144,7 @@ bundled local model
 - 目前這個 bundle 是針對「相同作業系統 + 相同 CPU 架構」攜帶。例：這次打的是 `macOS arm64`，所以最穩是搬到另一台 `macOS arm64` 機器。`run.sh` 會檢查這個條件。
 - 也就是說：不需要安裝第三方軟體，但不能保證同一份 bundle 同時跨 `macOS / Linux / Windows` 或 `arm64 / x86_64` 全部通用。
 - 在 macOS 上，launcher 會優先使用系統自帶的 `/usr/bin/python3`，所以目標機器不需要另外安裝 Python。
-- 在 Windows 上，PowerShell launcher 會優先尋找 `python`、`python3` 或 `py`；出廠空機若沒有 Python，需要把 portable Python 一起放進 bundle，或改用未來的 bundled `proxy.exe`。
+- 在 Windows 上，PowerShell launcher 會優先尋找 `local_ai/runtime/python/python.exe`，再 fallback 到 `python`、`python3` 或 `py`；設定 `CLAW_STRICT_OFFLINE=1` 時不允許 fallback。
 - `bash local_ai/cleanup_local.sh` 不會動到 `~/.ollama` 的全域模型快取，避免誤刪你原本就有的模型。
 - `powershell -ExecutionPolicy Bypass -File .\local_ai\cleanup_local.ps1` 也只會清 repo 內的 bundle。
 
@@ -160,6 +163,7 @@ Windows PowerShell：
 $env:CLAW_MODEL="qwen2.5-coder:14b"; powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
 $env:CLAW_OLLAMA_PORT="11435"; powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
 $env:CLAW_PERMISSION_MODE="read-only"; powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
+$env:CLAW_STRICT_OFFLINE="1"; powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
 $env:CLAW_SYSTEM_PROMPT="請全程使用繁體中文，並用條列整理答案。"; powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
 ```
 

@@ -14,6 +14,10 @@ research-claw-code usage
 若目標 Windows 空機沒有 Python，完整 Level 1 部署還需要帶入 portable Python，
 或之後改成 bundled proxy.exe。
 
+Windows launcher 已支援 CLAW_STRICT_OFFLINE=1。開啟後只接受 local_ai/runtime/
+內的 claw.exe、ollama.exe、模型快取、bundle-manifest.txt 與 Python，不會 fallback
+到系統安裝。
+
 1. 第一次準備離線 bundle
 
 在有網路的機器上執行：
@@ -130,6 +134,7 @@ $env:CLAW_MODEL="qwen2.5-coder:14b"; powershell -ExecutionPolicy Bypass -File .\
 $env:CLAW_OLLAMA_PORT="11435"; powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
 $env:CLAW_PROXY_PORT="8082"; powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
 $env:CLAW_PERMISSION_MODE="read-only"; powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
+$env:CLAW_STRICT_OFFLINE="1"; powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
 $env:CLAW_SYSTEM_PROMPT="請全程使用繁體中文，回答精簡一點"; powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
 
 7. 注意事項
@@ -138,7 +143,8 @@ $env:CLAW_SYSTEM_PROMPT="請全程使用繁體中文，回答精簡一點"; powe
 - local_ai/runtime/ 可能很大，因為模型會一起打包
 - --fast 會優先重用既有 binary 與已打包模型
 - --cached-only 不會下載模型；若本機沒有快取指定模型就直接失敗
-- Windows 出廠空機 Level 1 air-gap 需要額外確認 Python：目前 run.ps1 會找 python、python3 或 py
+- Windows 出廠空機 Level 1 air-gap 需要額外確認 Python：run.ps1 會先找 local_ai/runtime/python/python.exe，再找 python、python3 或 py
+- 設定 CLAW_STRICT_OFFLINE=1 時，run.ps1 不會 fallback 到系統安裝
 - bundle manifest 是 BOM-less UTF-8，Windows 打出的 bundle 搬到 macOS / Linux 讀取不會被 BOM 卡住
 - 重新啟動時若舊 proxy/ollama 還占著 port，Windows 與 macOS / Linux 都會等最多 10 秒再接手
 - local_ai/deploy_local.sh 與 local_ai/deploy_local.ps1 都會在結束時印出總耗時

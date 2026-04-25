@@ -18,7 +18,8 @@ Level 1 Windows Air-Gap 目標：
 - 可以用 USB、外接硬碟、光碟或預載映像檔帶入完整 bundle
 - 目標機只啟動 agent，不現場下載模型、不安裝 Ollama、不安裝 Rust、不編譯 claw
 - bundle 必須先在另一台有網路且同 OS/同 CPU 架構的準備機完成
-- 目前 Windows 啟動仍需要 python、python3 或 py；若出廠空機沒有 Python，需額外帶入 portable Python，或之後改用 bundled proxy.exe
+- Windows 啟動會先找 local_ai/runtime/python/python.exe，再找 python、python3 或 py；若出廠空機沒有 Python，需額外帶入 portable Python，或之後改用 bundled proxy.exe
+- 設定 CLAW_STRICT_OFFLINE=1 時，只允許使用 bundle 內的執行檔、模型、manifest 與 Python，不會 fallback 到系統安裝
 
 二、第一次準備離線 bundle
 

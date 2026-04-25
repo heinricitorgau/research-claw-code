@@ -34,6 +34,13 @@ function Find-BinaryPath($primary, $fallbacks) {
     return $null
 }
 
+function Test-Truthy($value) {
+    if (-not $value) {
+        return $false
+    }
+    return @("1", "true", "yes", "on") -contains $value.ToString().Trim().ToLowerInvariant()
+}
+
 function Resolve-CommandPath($name) {
     $command = Get-Command $name -ErrorAction SilentlyContinue
     if ($null -eq $command) {
@@ -94,6 +101,32 @@ function Wait-HttpOk($url, $seconds) {
     return $null
 }
 
+function Resolve-PythonPath($runtimeDir, $strictOffline) {
+    $bundledPythonCandidates = @(
+        (Join-Path $runtimeDir "python/python.exe"),
+        (Join-Path $runtimeDir "python/python3.exe"),
+        (Join-Path $runtimeDir "python/bin/python.exe"),
+        (Join-Path $runtimeDir "bin/python.exe")
+    )
+    foreach ($candidate in $bundledPythonCandidates) {
+        if (Test-Path $candidate) {
+            return $candidate
+        }
+    }
+    if ($strictOffline) {
+        return $null
+    }
+
+    $pythonPath = Resolve-CommandPath "python"
+    if (-not $pythonPath) {
+        $pythonPath = Resolve-CommandPath "python3"
+    }
+    if (-not $pythonPath) {
+        $pythonPath = Resolve-CommandPath "py"
+    }
+    return $pythonPath
+}
+
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectDir = Split-Path -Parent $scriptDir
 $runtimeDir = Join-Path $scriptDir "runtime"
@@ -151,6 +184,7 @@ $ollamaPort = if ($env:CLAW_OLLAMA_PORT) { [int]$env:CLAW_OLLAMA_PORT } else { 1
 $ollamaUrl = if ($env:OLLAMA_URL) { $env:OLLAMA_URL } else { "http://127.0.0.1:$ollamaPort" }
 $permissionMode = if ($env:CLAW_PERMISSION_MODE) { $env:CLAW_PERMISSION_MODE } else { "read-only" }
 $systemPrompt = if ($env:CLAW_SYSTEM_PROMPT) { $env:CLAW_SYSTEM_PROMPT } else { "你是離線終端機助理。請全程只使用繁體中文回答，不要混用其他語言。不要自己切換語言，也不要詢問是否要改用別的語言。請直接在對話中輸出答案，不要主動建立、修改或輸出成檔案，除非使用者明確要求你這樣做。如果使用者要求寫程式，請直接給正確答案；如果沒有明確指定程式語言，預設輸出 C 語言程式；如果已指定語言，就照指定語言回答。如果題目很簡單，請直接提供最短、正確的 C 程式。若未指定格式，請用清楚、直接、適合終端機閱讀的方式回覆。" }
+$strictOffline = Test-Truthy $env:CLAW_STRICT_OFFLINE
 
 $proxyProcess = $null
 $ollamaProcess = $null
@@ -169,35 +203,49 @@ try {
     Write-Host "  perms: $permissionMode" -ForegroundColor Cyan
     Write-Host "  proxy: http://127.0.0.1:$proxyPort" -ForegroundColor Cyan
     Write-Host "  ollama: $ollamaUrl" -ForegroundColor Cyan
+    if ($strictOffline) {
+        Write-Host "  strict: on" -ForegroundColor Cyan
+    }
     Write-Host ""
 
     Write-Header "preflight"
-    $pythonPath = Resolve-CommandPath "python"
+    $pythonPath = Resolve-PythonPath $runtimeDir $strictOffline
     if (-not $pythonPath) {
-        $pythonPath = Resolve-CommandPath "python3"
-    }
-    if (-not $pythonPath) {
-        $pythonPath = Resolve-CommandPath "py"
-    }
-    if (-not $pythonPath) {
+        if ($strictOffline) {
+            Write-Fail "bundled Python not found; strict offline mode expects local_ai/runtime/python/python.exe"
+        }
         Write-Fail "python not found; install Python or add it to PATH"
     }
     Write-Ok "python: $pythonPath"
 
-    $clawPath = Find-BinaryPath (Join-Path $binDir "claw.exe") @(
-        (Join-Path $projectDir "rust/target/release/claw.exe"),
-        (Join-Path $projectDir "rust/target/debug/claw.exe"),
-        (Resolve-CommandPath "claw")
-    )
+    $clawFallbacks = @()
+    if (-not $strictOffline) {
+        $clawFallbacks = @(
+            (Join-Path $projectDir "rust/target/release/claw.exe"),
+            (Join-Path $projectDir "rust/target/debug/claw.exe"),
+            (Resolve-CommandPath "claw")
+        )
+    }
+    $clawPath = Find-BinaryPath (Join-Path $binDir "claw.exe") $clawFallbacks
     if (-not $clawPath) {
+        if ($strictOffline) {
+            Write-Fail "bundled claw.exe not found; strict offline mode expects local_ai/runtime/bin/claw.exe"
+        }
         Write-Fail "cannot find claw binary"
     }
     Write-Ok "claw: $clawPath"
 
-    $ollamaPath = Find-BinaryPath (Join-Path $binDir "ollama.exe") @(
-        (Resolve-CommandPath "ollama")
-    )
+    $ollamaFallbacks = @()
+    if (-not $strictOffline) {
+        $ollamaFallbacks = @(
+            (Resolve-CommandPath "ollama")
+        )
+    }
+    $ollamaPath = Find-BinaryPath (Join-Path $binDir "ollama.exe") $ollamaFallbacks
     if (-not $ollamaPath) {
+        if ($strictOffline) {
+            Write-Fail "bundled ollama.exe not found; strict offline mode expects local_ai/runtime/bin/ollama.exe"
+        }
         Write-Fail "cannot find ollama binary"
     }
     Write-Ok "ollama: $ollamaPath"
@@ -206,6 +254,9 @@ try {
         $env:OLLAMA_MODELS = Join-Path $bundledOllamaHome "models"
         Write-Ok "using bundled models: $env:OLLAMA_MODELS"
     } else {
+        if ($strictOffline) {
+            Write-Fail "bundled model cache not found; strict offline mode expects local_ai/runtime/ollama-home"
+        }
         Write-Warn "bundled model cache not found; falling back to system ollama cache"
     }
 
@@ -220,6 +271,8 @@ try {
             Write-Fail "bundle targets $($manifest['bundle_os']), but this machine is Windows"
         }
         Write-Ok "bundle target matches this machine: Windows/$env:PROCESSOR_ARCHITECTURE"
+    } elseif ($strictOffline) {
+        Write-Fail "bundle manifest not found; strict offline mode expects local_ai/runtime/bundle-manifest.txt"
     }
 
     $env:OLLAMA_HOST = "127.0.0.1:$ollamaPort"

@@ -604,5 +604,44 @@ class TestBundleManifestBomless(unittest.TestCase):
             )
 
 
+# ────────────────────────────────────────────────────────────────────────────
+# H-v5-13 ~ 14：Windows Level 1 air-gap launcher contract
+# ────────────────────────────────────────────────────────────────────────────
+
+class TestWindowsAirgapLauncherContract(unittest.TestCase):
+    """鎖住 Windows launcher 對 bundled Python 與 strict offline 的契約。"""
+
+    RUN_PS1 = PROJECT_DIR / "local_ai" / "run.ps1"
+    PREPARE_PS1 = PROJECT_DIR / "local_ai" / "prepare_bundle.ps1"
+
+    def test_run_ps1_prefers_bundled_python_before_system_python(self):
+        text = self.RUN_PS1.read_text(encoding="utf-8")
+        bundled = 'Join-Path $runtimeDir "python/python.exe"'
+        system = 'Resolve-CommandPath "python"'
+        self.assertIn(bundled, text)
+        self.assertIn(system, text)
+        self.assertLess(
+            text.index(bundled),
+            text.index(system),
+            "run.ps1 should try local_ai/runtime/python/python.exe before PATH Python",
+        )
+
+    def test_run_ps1_strict_offline_disables_runtime_fallbacks(self):
+        text = self.RUN_PS1.read_text(encoding="utf-8")
+        self.assertIn("$strictOffline = Test-Truthy $env:CLAW_STRICT_OFFLINE", text)
+        self.assertIn("if ($strictOffline) {", text)
+        self.assertIn("bundled Python not found", text)
+        self.assertIn("bundled claw.exe not found", text)
+        self.assertIn("bundled ollama.exe not found", text)
+        self.assertIn("bundled model cache not found", text)
+        self.assertIn("bundle manifest not found", text)
+
+    def test_prepare_bundle_manifest_records_python_runtime_status(self):
+        text = self.PREPARE_PS1.read_text(encoding="utf-8")
+        self.assertIn("python_runtime=", text)
+        self.assertIn("python_binary=", text)
+        self.assertIn('Join-Path $runtimeDir "python/python.exe"', text)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
