@@ -28,6 +28,17 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+try:
+    from prompt_loader import load_prompt_profile
+    from checkers.check_c_answer import check_c_answer
+    from repair_loop import append_checker_warnings, build_repair_prompt
+    from rag.search_docs import format_context, search as search_rag
+except ImportError:  # pragma: no cover - package import path used by tests
+    from local_ai.prompt_loader import load_prompt_profile
+    from local_ai.checkers.check_c_answer import check_c_answer
+    from local_ai.repair_loop import append_checker_warnings, build_repair_prompt
+    from local_ai.rag.search_docs import format_context, search as search_rag
+
 
 # ── 設定 ──────────────────────────────────────────────────────────────────────
 
@@ -292,6 +303,25 @@ def _programming_mode_instruction(user_text: str) -> str | None:
     )
 
 
+def _rag_context_instruction(user_text: str) -> str | None:
+    enabled = os.environ.get("CLAW_RAG_ENABLED", "").strip().lower()
+    if enabled not in ("1", "true", "yes", "on"):
+        return None
+    try:
+        top_k = int(os.environ.get("CLAW_RAG_TOP_K", "5"))
+    except ValueError:
+        top_k = 5
+    results = search_rag(user_text, top_k=top_k)
+    context = format_context(results)
+    if not context:
+        return None
+    return (
+        "以下是離線本地 RAG 文件檢索結果。請優先根據這些片段回答；"
+        "若片段不足，請明確說明限制，不要聲稱已上網查詢。\n\n"
+        f"{context}"
+    )
+
+
 def _detect_programming_language(user_text: str) -> str | None:
     if not _looks_like_programming_request(user_text):
         return None
@@ -495,29 +525,42 @@ def _repair_c_response(
     ollama_url: str,
 ) -> dict:
     current_response = initial_response
-    for _ in range(MAX_C_REPAIR_ATTEMPTS):
+    max_attempts = int(os.environ.get("CLAW_MAX_REPAIR_RETRIES", str(MAX_C_REPAIR_ATTEMPTS)))
+    best_response = current_response
+    best_check = {"ok": False, "score": -1.0, "issues": [], "suggestions": []}
+    for _ in range(max_attempts + 1):
         content_text = current_response.get("choices", [{}])[0].get("message", {}).get("content", "")
-        ok, compile_error = _compile_check_c_code(user_text, content_text)
-        if ok:
+        check = check_c_answer(content_text, user_text)
+        if check.get("score", 0) >= best_check.get("score", 0):
+            best_response = current_response
+            best_check = check
+        if check.get("ok"):
             return current_response
+        if _ >= max_attempts:
+            break
 
         repair_messages = list(oai_payload.get("messages", []))
         repair_messages.append({"role": "assistant", "content": content_text})
         repair_messages.append({
             "role": "user",
-            "content": (
-                "你上一個 C 程式無法通過語法檢查。"
-                "請依照以下錯誤重寫成符合題意、可編譯的標準 C11 程式。"
-                "只輸出一個 ```c 程式碼區塊，不要加任何解釋。\n\n"
-                f"檢查錯誤：\n{compile_error}"
-            ),
+            "content": build_repair_prompt(user_text, content_text, check),
         })
         repair_payload = dict(oai_payload)
         repair_payload["messages"] = repair_messages
         repair_payload["stream"] = False
         repair_payload["temperature"] = 0.0
         current_response = _request_ollama_completion(repair_payload, ollama_url)
-    return current_response
+
+    content_text = best_response.get("choices", [{}])[0].get("message", {}).get("content", "")
+    best_response = dict(best_response)
+    best_response["choices"] = list(best_response.get("choices", []))
+    if best_response["choices"]:
+        choice = dict(best_response["choices"][0])
+        message = dict(choice.get("message", {}))
+        message["content"] = append_checker_warnings(content_text, best_check)
+        choice["message"] = message
+        best_response["choices"][0] = choice
+    return best_response
 
 
 def anthropic_to_openai(body: dict, model: str, default_system_prompt: str | None = None) -> dict:
@@ -539,6 +582,9 @@ def anthropic_to_openai(body: dict, model: str, default_system_prompt: str | Non
     programming_instruction = _programming_mode_instruction(_latest_user_text(body))
     if programming_instruction:
         system_parts.append(programming_instruction)
+    rag_instruction = _rag_context_instruction(_latest_user_text(body))
+    if rag_instruction:
+        system_parts.append(rag_instruction)
     if system_parts:
         messages.append({"role": "system", "content": "\n\n".join(system_parts)})
 
@@ -951,15 +997,21 @@ def main() -> None:
     parser.add_argument("--ollama-url", default=DEFAULT_OLLAMA_URL, help="Ollama 服務 URL")
     parser.add_argument(
         "--system-prompt",
-        default=DEFAULT_SYSTEM_PROMPT,
+        default=None,
         help="附加到每次請求的預設 system prompt",
     )
+    parser.add_argument("--prompt-profile", default=None, help="local_ai/prompts 底下的 prompt profile")
+    parser.add_argument("--prompt-dir", default=None, help="prompt profile 目錄")
     args = parser.parse_args()
 
     ProxyHandler.ollama_url = args.ollama_url
     ProxyHandler.local_model = args.model
     ProxyHandler.ollama_model = args.ollama_model or args.model
-    ProxyHandler.default_system_prompt = args.system_prompt
+    ProxyHandler.default_system_prompt = load_prompt_profile(
+        profile=args.prompt_profile,
+        prompt_dir=args.prompt_dir,
+        override_prompt=args.system_prompt,
+    )
 
     sys.stderr.write(f"[proxy] 等待 Ollama 啟動（{args.ollama_url}）...\n")
     if not wait_for_ollama(args.ollama_url):

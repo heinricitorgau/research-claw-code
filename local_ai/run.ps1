@@ -183,8 +183,11 @@ $proxyPort = if ($env:CLAW_PROXY_PORT) { [int]$env:CLAW_PROXY_PORT } else { 8082
 $ollamaPort = if ($env:CLAW_OLLAMA_PORT) { [int]$env:CLAW_OLLAMA_PORT } else { 11435 }
 $ollamaUrl = if ($env:OLLAMA_URL) { $env:OLLAMA_URL } else { "http://127.0.0.1:$ollamaPort" }
 $permissionMode = if ($env:CLAW_PERMISSION_MODE) { $env:CLAW_PERMISSION_MODE } else { "read-only" }
-$systemPrompt = if ($env:CLAW_SYSTEM_PROMPT) { $env:CLAW_SYSTEM_PROMPT } else { "你是離線終端機助理。請全程只使用繁體中文回答，不要混用其他語言。不要自己切換語言，也不要詢問是否要改用別的語言。請直接在對話中輸出答案，不要主動建立、修改或輸出成檔案，除非使用者明確要求你這樣做。如果使用者要求寫程式，請直接給正確答案；如果沒有明確指定程式語言，預設輸出 C 語言程式；如果已指定語言，就照指定語言回答。如果題目很簡單，請直接提供最短、正確的 C 程式。若未指定格式，請用清楚、直接、適合終端機閱讀的方式回覆。" }
+$systemPrompt = if ($env:CLAW_SYSTEM_PROMPT) { $env:CLAW_SYSTEM_PROMPT } else { "" }
+$promptProfile = if ($env:CLAW_PROMPT_PROFILE) { $env:CLAW_PROMPT_PROFILE } else { "default_zh_tw" }
+$promptDir = if ($env:CLAW_PROMPT_DIR) { $env:CLAW_PROMPT_DIR } else { Join-Path $scriptDir "prompts" }
 $strictOffline = Test-Truthy $env:CLAW_STRICT_OFFLINE
+$ragQuery = ""
 
 $proxyProcess = $null
 $ollamaProcess = $null
@@ -203,6 +206,7 @@ try {
     Write-Host "  perms: $permissionMode" -ForegroundColor Cyan
     Write-Host "  proxy: http://127.0.0.1:$proxyPort" -ForegroundColor Cyan
     Write-Host "  ollama: $ollamaUrl" -ForegroundColor Cyan
+    Write-Host "  prompt: $promptProfile" -ForegroundColor Cyan
     if ($strictOffline) {
         Write-Host "  strict: on" -ForegroundColor Cyan
     }
@@ -217,6 +221,31 @@ try {
         Write-Fail "python not found; install Python or add it to PATH"
     }
     Write-Ok "python: $pythonPath"
+
+    $passthroughArgs = @()
+    for ($i = 0; $i -lt $args.Count; $i++) {
+        switch ($args[$i]) {
+            "--import-docs" {
+                if ($i + 1 -ge $args.Count) { Write-Fail "--import-docs requires a source path" }
+                & $pythonPath (Join-Path $scriptDir "rag/import_usb_docs.py") $args[$i + 1]
+                exit $LASTEXITCODE
+            }
+            "--reindex-rag" {
+                & $pythonPath (Join-Path $scriptDir "rag/build_index.py")
+                exit $LASTEXITCODE
+            }
+            "--rag" {
+                if ($i + 1 -ge $args.Count) { Write-Fail "--rag requires a question" }
+                $env:CLAW_RAG_ENABLED = "1"
+                $ragQuery = $args[$i + 1]
+                $i++
+            }
+            default {
+                $passthroughArgs += $args[$i]
+            }
+        }
+    }
+    $args = $passthroughArgs
 
     $clawFallbacks = @()
     if (-not $strictOffline) {
@@ -299,14 +328,19 @@ try {
     Write-Header "proxy"
     Stop-ListenerOnPort $proxyPort "proxy"
     $proxyLog = Join-Path ([System.IO.Path]::GetTempPath()) "claw-local-proxy.log"
-    $proxyProcess = Start-Process -FilePath $pythonPath -ArgumentList @(
+    $proxyArgs = @(
         (Join-Path $scriptDir "proxy.py"),
         "--model", $model,
         "--ollama-model", $ollamaRequestModel,
         "--port", "$proxyPort",
         "--ollama-url", $ollamaUrl,
-        "--system-prompt", $systemPrompt
-    ) -RedirectStandardOutput $proxyLog -RedirectStandardError $proxyLog -PassThru -WindowStyle Hidden
+        "--prompt-profile", $promptProfile,
+        "--prompt-dir", $promptDir
+    )
+    if ($systemPrompt) {
+        $proxyArgs += @("--system-prompt", $systemPrompt)
+    }
+    $proxyProcess = Start-Process -FilePath $pythonPath -ArgumentList $proxyArgs -RedirectStandardOutput $proxyLog -RedirectStandardError $proxyLog -PassThru -WindowStyle Hidden
     $proxyReadyIn = Wait-HttpOk "http://127.0.0.1:$proxyPort/health" 10
     if ($null -eq $proxyReadyIn) {
         Write-Fail "proxy failed to start; check $proxyLog"
@@ -319,6 +353,10 @@ try {
 
     $env:ANTHROPIC_BASE_URL = "http://127.0.0.1:$proxyPort"
     $env:ANTHROPIC_API_KEY = "local-ollama"
+
+    if ($ragQuery -and $args.Count -eq 0) {
+        $args = @("--output-format", "text", "prompt", $ragQuery)
+    }
 
     $finalArgs = @()
     if ($args -notcontains "--model") {

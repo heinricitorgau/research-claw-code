@@ -78,7 +78,10 @@ PROXY_PORT="${CLAW_PROXY_PORT:-8082}"
 OLLAMA_PORT="${CLAW_OLLAMA_PORT:-11435}"
 OLLAMA_URL="${OLLAMA_URL:-http://127.0.0.1:${OLLAMA_PORT}}"
 PERMISSION_MODE="${CLAW_PERMISSION_MODE:-read-only}"
-SYSTEM_PROMPT="${CLAW_SYSTEM_PROMPT:-你是離線終端機助理。請全程只使用繁體中文回答，不要混用其他語言。不要自己切換語言，也不要詢問是否要改用別的語言。請直接在對話中輸出答案，不要主動建立、修改或輸出成檔案，除非使用者明確要求你這樣做。如果使用者要求寫程式，請直接給正確答案；如果沒有明確指定程式語言，預設輸出 C 語言程式；如果已指定語言，就照指定語言回答。如果題目很簡單，請直接提供最短、正確的 C 程式。若未指定格式，請用清楚、直接、適合終端機閱讀的方式回覆。}"
+SYSTEM_PROMPT="${CLAW_SYSTEM_PROMPT:-}"
+PROMPT_PROFILE="${CLAW_PROMPT_PROFILE:-default_zh_tw}"
+PROMPT_DIR="${CLAW_PROMPT_DIR:-$SCRIPT_DIR/prompts}"
+RAG_QUERY=""
 
 PROXY_PID=""
 OLLAMA_PID=""
@@ -134,6 +137,11 @@ BANNER
     printf "  perms: ${CYAN}%s${RESET}\n" "$PERMISSION_MODE"
     printf "  proxy: ${CYAN}http://127.0.0.1:%s${RESET}\n" "$PROXY_PORT"
     printf "  ollama: ${CYAN}%s${RESET}\n\n" "$OLLAMA_URL"
+    printf "  prompt: ${CYAN}%s${RESET}\n" "$PROMPT_PROFILE"
+    if [[ "${CLAW_RAG_ENABLED:-}" == "1" ]]; then
+        printf "  rag: ${CYAN}enabled${RESET}\n"
+    fi
+    printf "\n"
 }
 
 find_claw_binary() {
@@ -214,6 +222,36 @@ if ! PYTHON_BIN="$(find_python_binary)"; then
     fail "python3 not found; this bundle expects the OS built-in Python runtime"
 fi
 ok "python: ${PYTHON_BIN}"
+
+passthrough_args=()
+while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+        --import-docs)
+            [[ "$#" -ge 2 ]] || fail "--import-docs requires a source path"
+            "$PYTHON_BIN" "$SCRIPT_DIR/rag/import_usb_docs.py" "$2"
+            exit 0
+            ;;
+        --reindex-rag)
+            "$PYTHON_BIN" "$SCRIPT_DIR/rag/build_index.py"
+            exit 0
+            ;;
+        --rag)
+            [[ "$#" -ge 2 ]] || fail "--rag requires a question"
+            export CLAW_RAG_ENABLED=1
+            RAG_QUERY="$2"
+            shift 2
+            ;;
+        *)
+            passthrough_args+=("$1")
+            shift
+            ;;
+    esac
+done
+if [[ "${#passthrough_args[@]}" -gt 0 ]]; then
+    set -- "${passthrough_args[@]}"
+else
+    set --
+fi
 
 if ! CLAW_BIN="$(find_claw_binary)"; then
     require_runtime_hint
@@ -308,13 +346,19 @@ header "proxy"
 
 stop_listener_on_port "$PROXY_PORT" "proxy"
 
-"$PYTHON_BIN" "$SCRIPT_DIR/proxy.py" \
-    --model "$MODEL" \
-    --ollama-model "$OLLAMA_REQUEST_MODEL" \
-    --port "$PROXY_PORT" \
-    --ollama-url "$OLLAMA_URL" \
-    --system-prompt "$SYSTEM_PROMPT" \
-    >/tmp/claw-local-proxy.log 2>&1 &
+proxy_args=(
+    "$SCRIPT_DIR/proxy.py"
+    --model "$MODEL"
+    --ollama-model "$OLLAMA_REQUEST_MODEL"
+    --port "$PROXY_PORT"
+    --ollama-url "$OLLAMA_URL"
+    --prompt-profile "$PROMPT_PROFILE"
+    --prompt-dir "$PROMPT_DIR"
+)
+if [[ -n "$SYSTEM_PROMPT" ]]; then
+    proxy_args+=(--system-prompt "$SYSTEM_PROMPT")
+fi
+"$PYTHON_BIN" "${proxy_args[@]}" >/tmp/claw-local-proxy.log 2>&1 &
 PROXY_PID=$!
 for i in $(seq 1 10); do
     if curl -sf "http://127.0.0.1:${PROXY_PORT}/health" >/dev/null 2>&1; then
@@ -332,6 +376,10 @@ printf "${GREEN}ready${RESET} local AI is up. Press Ctrl+C to exit.\n\n"
 
 export ANTHROPIC_BASE_URL="http://127.0.0.1:${PROXY_PORT}"
 export ANTHROPIC_API_KEY="local-ollama"
+
+if [[ -n "$RAG_QUERY" && "$#" -eq 0 ]]; then
+    set -- --output-format text prompt "$RAG_QUERY"
+fi
 
 if [[ "$#" -eq 0 ]]; then
     exec "$CLAW_BIN" --model "$MODEL" --permission-mode "$PERMISSION_MODE"

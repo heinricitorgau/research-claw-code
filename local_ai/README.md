@@ -25,6 +25,13 @@ Windows launcher 已支援 `CLAW_STRICT_OFFLINE=1`。開啟後只接受 `local_a
 
 現在的 launcher 不依賴系統安裝的 `ollama`。它會直接使用 `local_ai/runtime/` 內打包好的執行檔與模型，並優先透過 bundled Python 跑一層很薄的本地 proxy；若沒有 bundled Python，普通模式才會 fallback 到系統 Python。離線模式下，proxy 會預設附加繁體中文 system prompt，因此一般提問會直接用中文回覆；如果要它寫程式而你沒有指定語言，預設會輸出 `C` 語言。啟動時也會預設使用 `read-only` 權限，所以它會直接輸出答案，而不是主動改檔或寫檔。
 
+新增的離線增強層都只使用本機檔案與 Python 標準庫：
+
+- Prompt profiles：`local_ai/prompts/default_zh_tw.md`、`c_programming.md`、`project_assistant.md`
+- Local checkers：`local_ai/checkers/` 會輸出 structured JSON
+- RAG 文件庫：`local_ai/rag/docs/`、`local_ai/rag/index/`
+- Automatic correction loop：C 題 checker 失敗時自動要求模型修正，預設最多 2 次
+
 ## 你要用的兩個指令
 
 ### 第一次準備 bundle
@@ -101,6 +108,76 @@ Windows PowerShell：
 powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1 "幫我解釋這個 repo 的架構"
 ```
 
+### Prompt profiles
+
+預設載入 `local_ai/prompts/default_zh_tw.md`。可用環境變數切換：
+
+```bash
+CLAW_PROMPT_PROFILE=c_programming bash local_ai/run.sh
+CLAW_PROMPT_DIR=local_ai/prompts bash local_ai/run.sh
+```
+
+Windows PowerShell：
+
+```powershell
+$env:CLAW_PROMPT_PROFILE="project_assistant"; powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
+```
+
+`CLAW_SYSTEM_PROMPT` 仍可使用；設定後會覆蓋 profile 內容。
+
+### Local checker 與自動修正
+
+C 程式回答會通過 `local_ai/checkers/check_c_answer.py`，檢查 `#include <stdio.h>`、`int main`、括號平衡、明顯非 C 語法、本機 gcc/clang/cc 編譯、測試輸入/輸出、離線安全與危險指令。checker 回傳 JSON，例如：
+
+```json
+{
+  "ok": false,
+  "score": 0.55,
+  "issues": ["Missing test input/output"],
+  "suggestions": ["Add at least one sample run"]
+}
+```
+
+若 checker 失敗，proxy 會建立 repair prompt，包含原始問題、上一版回答、checker JSON，並要求只修正列出的問題。重試次數可調：
+
+```bash
+CLAW_MAX_REPAIR_RETRIES=2 bash local_ai/run.sh
+```
+
+### RAG 文件庫
+
+USB 帶入的 `.md`、`.txt`、`.c`、`.h`、`.py`、`.json`、`.csv` 可放進 `local_ai/rag/docs/`，再建立本機索引：
+
+```bash
+bash local_ai/run.sh --import-docs /Volumes/USB/my_notes
+bash local_ai/run.sh --reindex-rag
+bash local_ai/run.sh --rag "請根據我的 C 語言筆記解釋 pointer"
+```
+
+Windows PowerShell：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1 --import-docs E:\my_notes
+powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1 --reindex-rag
+powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1 --rag "請根據我的 C 語言筆記解釋 pointer"
+```
+
+搜尋採用 dependency-light 的 keyword / BM25-like scoring，並加權檔名與 Markdown heading。回答 prompt 會包含來源，例如：
+
+```text
+參考本地文件：
+- local_ai/rag/docs/c_pointer_notes.md
+```
+
+## Offline USB Workflow
+
+1. Prepare the bundle on an online machine.
+2. Copy the repository to a USB drive formatted as exFAT.
+3. On the offline target machine, copy the repository locally.
+4. Put extra notes or documents into `local_ai/rag/docs/`.
+5. Run `bash local_ai/run.sh --reindex-rag`.
+6. Ask questions with `--rag`.
+
 ### 用完後清理 bundle
 
 ```bash
@@ -171,6 +248,8 @@ CLAW_MODEL=qwen2.5-coder:14b bash local_ai/run.sh
 CLAW_OLLAMA_PORT=11435 bash local_ai/run.sh
 CLAW_PERMISSION_MODE=read-only bash local_ai/run.sh
 CLAW_SYSTEM_PROMPT="請全程使用繁體中文，並用條列整理答案。" bash local_ai/run.sh
+CLAW_PROMPT_PROFILE=c_programming bash local_ai/run.sh
+CLAW_MAX_REPAIR_RETRIES=2 bash local_ai/run.sh
 ```
 
 Windows PowerShell：
@@ -181,6 +260,8 @@ $env:CLAW_OLLAMA_PORT="11435"; powershell -ExecutionPolicy Bypass -File .\local_
 $env:CLAW_PERMISSION_MODE="read-only"; powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
 $env:CLAW_STRICT_OFFLINE="1"; powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
 $env:CLAW_SYSTEM_PROMPT="請全程使用繁體中文，並用條列整理答案。"; powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
+$env:CLAW_PROMPT_PROFILE="c_programming"; powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
+$env:CLAW_MAX_REPAIR_RETRIES="2"; powershell -ExecutionPolicy Bypass -File .\local_ai\run.ps1
 ```
 
 ## 疑難排解
@@ -205,3 +286,15 @@ cat local_ai/runtime/bundle-manifest.txt
 tail -f /tmp/claw-local-ollama.log
 tail -f /tmp/claw-local-proxy.log
 ```
+
+### RAG 找不到文件
+
+先確認檔案副檔名是否為支援格式，並重新建立索引：
+
+```bash
+bash local_ai/run.sh --reindex-rag
+```
+
+### checker 一直警告
+
+如果本機沒有 C compiler，checker 會跳過編譯檢查，但仍會做靜態檢查。若答案在重試後仍未通過，系統會輸出目前最佳答案並附上「本地檢查警告」。
