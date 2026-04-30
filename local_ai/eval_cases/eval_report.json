@@ -1,9 +1,9 @@
 {
-  "timestamp": 1777542074,
+  "timestamp": 1777543690,
   "total_cases": 4,
   "cases_tested": 4,
   "total_points": 65,
-  "total_earned": 0,
+  "total_earned": 14.9,
   "results": [
     {
       "case_id": "2025_midterm_004",
@@ -24,14 +24,20 @@
     },
     {
       "case_id": "2025_midterm_001",
-      "compile_pass": false,
-      "run_pass": false,
+      "compile_pass": true,
+      "run_pass": true,
       "keyword_pass": false,
-      "structure_pass": false,
-      "score": 0.0,
+      "structure_pass": true,
+      "score": 8.4,
       "messages": [
-        "No answer code supplied. Use --use-ai or --answers-dir."
+        "Code structure keywords found",
+        "Compile: Compiled successfully",
+        "Runtime: OK",
+        "Missing output keywords: ['0.607']",
+        "Behavior: Value -1.236724 < minimum 0.6"
       ],
+      "output": "-1.236724\n",
+      "behavior_pass": false,
       "case_info": {
         "year": 2025,
         "exam": "midterm",
@@ -41,14 +47,20 @@
     },
     {
       "case_id": "2025_midterm_002",
-      "compile_pass": false,
-      "run_pass": false,
+      "compile_pass": true,
+      "run_pass": true,
       "keyword_pass": false,
       "structure_pass": false,
-      "score": 0.0,
+      "score": 6.5,
       "messages": [
-        "No answer code supplied. Use --use-ai or --answers-dir."
+        "Missing code structure keywords: ['nested loop']",
+        "Compile: Compiled successfully",
+        "Runtime: OK",
+        "Missing output keywords: ['2 2', '11111', '222']",
+        "Behavior: Expected behavior smoke check passed"
       ],
+      "output": "1\n22\n333\n22\n1\n",
+      "behavior_pass": true,
       "case_info": {
         "year": 2025,
         "exam": "midterm",
@@ -74,5 +86,5 @@
       }
     }
   ],
-  "pass_rate": 0.0
+  "pass_rate": 22.9
 }

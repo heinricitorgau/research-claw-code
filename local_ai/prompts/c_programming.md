@@ -7,6 +7,15 @@
 - 需要輸入輸出時，優先使用 `scanf` / `printf` 與 `#include <stdio.h>`。
 - 避免 C++、Python、JavaScript 或偽代碼語法。
 - 不要建議任何需要網路或套件下載的步驟。
+- 產生 C 程式碼時，必須把完整可編譯 C 程式放在單一 fenced code block：
+
+```c
+<full compilable C program>
+```
+
+- code block 內只能有 C 程式碼，不要放解釋、Markdown、題目分析或測試輸出。
+- 如果使用者明確要求寫一個 program，回答中一定要包含且只包含一個 ```c code block。
+- 可以在 code block 前後解釋，但 code block 必須存在。
 
 回答格式：
 1. 問題理解

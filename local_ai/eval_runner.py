@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -16,6 +17,9 @@ import tempfile
 import time
 from pathlib import Path
 from typing import Any
+
+ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+AI_TIMEOUT_SECONDS = 300
 
 
 def default_eval_dir() -> Path:
@@ -56,21 +60,169 @@ def load_eval_cases(eval_dir: Path | None = None) -> list[dict[str, Any]]:
     return cases
 
 
-def extract_c_code(text: str) -> str:
-    """Extract C code from text (markdown or plain)."""
-    matches = re.findall(r"```(?:c|C)\s*\n(.*?)```", text, re.DOTALL)
-    if matches:
-        return matches[0].strip()
+def normalize_model_output(text: str) -> str:
+    """Remove terminal noise and normalize model output before extraction."""
+    normalized = ANSI_RE.sub("", text)
+    normalized = normalized.replace("\r\n", "\n").replace("\r", "\n")
 
-    matches = re.findall(r"```\s*\n(.*?)```", text, re.DOTALL)
-    if matches:
-        return matches[0].strip()
+    noisy_patterns = (
+        r"^\s*[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏].*Thinking.*$",
+        r"^\s*.*Thinking[.…。]*\s*$",
+        r"^\s*✔ .*Done\s*$",
+        r"^\s*╭─\s*c\s*$",
+        r"^\s*╰.*$",
+    )
+    for pattern in noisy_patterns:
+        normalized = re.sub(pattern, "", normalized, flags=re.IGNORECASE | re.MULTILINE)
 
+    return normalized.strip()
+
+
+def mask_c_comments_and_strings(code: str) -> str:
+    """Mask strings/comments so brace validation is not confused by printf text."""
+    out: list[str] = []
+    i = 0
+    state = "code"
+    while i < len(code):
+        ch = code[i]
+        nxt = code[i + 1] if i + 1 < len(code) else ""
+
+        if state == "code":
+            if ch == "/" and nxt == "/":
+                out.extend("  ")
+                i += 2
+                state = "line_comment"
+                continue
+            if ch == "/" and nxt == "*":
+                out.extend("  ")
+                i += 2
+                state = "block_comment"
+                continue
+            if ch == '"':
+                out.append(" ")
+                i += 1
+                state = "string"
+                continue
+            if ch == "'":
+                out.append(" ")
+                i += 1
+                state = "char"
+                continue
+            out.append(ch)
+        elif state == "line_comment":
+            out.append("\n" if ch == "\n" else " ")
+            if ch == "\n":
+                state = "code"
+        elif state == "block_comment":
+            out.append("\n" if ch == "\n" else " ")
+            if ch == "*" and nxt == "/":
+                out.append(" ")
+                i += 1
+                state = "code"
+        elif state == "string":
+            out.append("\n" if ch == "\n" else " ")
+            if ch == "\\" and nxt:
+                out.append(" ")
+                i += 1
+            elif ch == '"':
+                state = "code"
+        elif state == "char":
+            out.append("\n" if ch == "\n" else " ")
+            if ch == "\\" and nxt:
+                out.append(" ")
+                i += 1
+            elif ch == "'":
+                state = "code"
+        i += 1
+    return "".join(out)
+
+
+def has_balanced_braces(code: str) -> bool:
+    """Return True when braces are balanced and never close before opening."""
+    masked = mask_c_comments_and_strings(code)
+    depth = 0
+    for ch in masked:
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth < 0:
+                return False
+    return depth == 0
+
+
+def validate_c_code(code: str) -> bool:
+    """Validate extracted text as a minimal complete C program."""
+    return bool(
+        code
+        and "#include" in code
+        and re.search(r"\bint\s+main\s*\(", code)
+        and has_balanced_braces(code)
+    )
+
+
+def extract_until_main_closing_brace(text: str, start: int, main_match: re.Match[str]) -> str:
+    """Capture a C translation unit from first include through main's closing brace."""
+    masked = mask_c_comments_and_strings(text)
+    open_at = masked.find("{", main_match.end())
+    if open_at < 0:
+        return ""
+
+    depth = 0
+    for idx in range(open_at, len(masked)):
+        ch = masked[idx]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : idx + 1].strip()
+            if depth < 0:
+                return ""
+    return ""
+
+
+def heuristic_extract_c_code(text: str) -> str:
+    """Find a region containing #include and int main, ending at main's close brace."""
     include_at = text.find("#include")
-    if include_at >= 0:
-        return text[include_at:].strip()
+    main_match = re.search(r"\bint\s+main\s*\(", text)
+    if include_at < 0 or not main_match:
+        return ""
 
-    return text.strip()
+    start = include_at if include_at < main_match.start() else max(include_at, 0)
+    code = extract_until_main_closing_brace(text, start, main_match)
+    return code if validate_c_code(code) else ""
+
+
+def debug_extraction_failure(raw_output: str) -> None:
+    print("[debug] raw model output:", file=sys.stderr)
+    print(raw_output[:500], file=sys.stderr)
+    print("[debug] extraction failed", file=sys.stderr)
+
+
+def extract_c_code(text: str, *, debug: bool = True) -> str:
+    """Extract and validate C code from markdown, CLI output, or plain text."""
+    normalized = normalize_model_output(text)
+
+    matches = re.findall(r"```c(.*?)```", normalized, re.DOTALL | re.IGNORECASE)
+    for match in matches:
+        code = match.strip()
+        if validate_c_code(code):
+            return code
+
+    matches = re.findall(r"```(.*?)```", normalized, re.DOTALL)
+    for match in matches:
+        code = match.strip()
+        if validate_c_code(code):
+            return code
+
+    code = heuristic_extract_c_code(normalized)
+    if code:
+        return code
+
+    if debug:
+        debug_extraction_failure(text)
+    return ""
 
 
 def find_c_compiler() -> str | None:
@@ -254,11 +406,37 @@ def build_model_prompt(case: dict[str, Any]) -> str:
     expected = json.dumps(case.get("expected_behavior", {}), ensure_ascii=False)
     return (
         "Write a complete, single-file C99 program for this exam problem.\n"
-        "Return only C code inside one ```c code block. Do not include explanations.\n\n"
+        "Return ONLY one fenced C code block in this exact format:\n"
+        "```c\n"
+        "<full compilable C program>\n"
+        "```\n"
+        "Do not include explanations before or after the block.\n\n"
         f"Problem:\n{case.get('prompt', '')}\n\n"
         f"Required features:\n{features}\n\n"
         f"Sample stdin:\n{sample_input}\n\n"
         f"Expected behavior smoke hints:\n{expected}\n"
+    )
+
+
+def build_repair_prompt(previous_output: str) -> str:
+    return (
+        "Your previous answer did not contain a valid ```c code block.\n"
+        "Please rewrite ONLY the C program in a single ```c block.\n"
+        "Do not include explanation.\n\n"
+        "Previous answer:\n"
+        f"{previous_output[:4000]}\n"
+    )
+
+
+def call_local_ai(run_script: Path, prompt: str, timeout: int = AI_TIMEOUT_SECONDS) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env.setdefault("CLAW_PROMPT_PROFILE", "c_programming")
+    return subprocess.run(
+        ["bash", str(run_script), "--output-format", "text", "prompt", prompt],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        env=env,
     )
 
 
@@ -277,24 +455,23 @@ def generate_ai_response(case: dict[str, Any]) -> str:
         
         full_prompt = build_model_prompt(case)
 
-        result = subprocess.run(
-            ["bash", str(run_script), "--output-format", "text", "prompt", full_prompt],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        
+        result = call_local_ai(run_script, full_prompt)
         combined = "\n".join(part for part in (result.stdout, result.stderr) if part)
-        if result.returncode == 0:
+        if result.returncode == 0 and extract_c_code(combined, debug=False):
             return combined
 
         extracted = extract_c_code(combined)
-        if "#include" in extracted or "int main" in extracted:
+        if extracted:
             print(
                 f"Warning: local AI returned non-zero for {case.get('id')}, but C code was found; continuing.",
                 file=sys.stderr,
             )
             return extracted
+
+        repair_result = call_local_ai(run_script, build_repair_prompt(combined))
+        repaired = "\n".join(part for part in (repair_result.stdout, repair_result.stderr) if part)
+        if extract_c_code(repaired, debug=False):
+            return repaired
 
         details = combined.strip()
         print(f"Warning: AI generation failed for {case.get('id')}: {details[:300]}", file=sys.stderr)
@@ -357,16 +534,15 @@ def run_evaluation(
         else:
             code = case.get("reference_answer", "")
 
-        if not code:
-            print("no answer")
-            results = {
+        def no_code_result(message: str) -> dict[str, Any]:
+            return {
                 "case_id": case_id,
                 "compile_pass": False,
                 "run_pass": False,
                 "keyword_pass": False,
                 "structure_pass": False,
                 "score": 0.0,
-                "messages": ["No answer code supplied. Use --use-ai or --answers-dir."],
+                "messages": [message],
                 "case_info": {
                     "year": case.get("year"),
                     "exam": case.get("exam"),
@@ -374,11 +550,22 @@ def run_evaluation(
                     "points": display_points(points),
                 },
             }
+
+        if not code:
+            print("no answer")
+            results = no_code_result("No answer code supplied. Use --use-ai or --answers-dir.")
             report["results"].append(results)
             report["cases_tested"] += 1
             continue
         
         code = extract_c_code(code)
+        if not code:
+            print("no code")
+            results = no_code_result("No valid C code could be extracted from the model output.")
+            report["results"].append(results)
+            report["cases_tested"] += 1
+            continue
+
         results = run_smoke_tests(code, case)
         
         # Print result summary
